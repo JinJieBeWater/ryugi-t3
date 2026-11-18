@@ -1,11 +1,14 @@
 # Ryugi × T3 Code
 
-在 T3 的 Claude、Codex、Pi 或 Antigravity 线程中运行 `ryugi start --artifact artboard/layout`（或 `node …/ryugi.cjs start …`）即绑定该产物。之后的提交、撤回和人类评论会送回原线程。换宿主时跟随线程当前的评论游标。同一产物在另一线程重新打开即转移归属。
+T3 线程里的 agent 运行 `ryugi start --artifact artboard/layout` 后，接着运行 `ryugi-t3-watch subscribe`，之后的提交、撤回和人类评论会送回这个线程。线程 ID 取自 `--thread` 或 T3 注入的 `T3CODE_THREAD_ID`；Antigravity 不注入时，取本项目唯一在运行的 Antigravity 线程。订阅期间，项目里所有 Ryugi 原生订阅都会去掉这个产物，反馈只由 T3 投递一次；线程结束一轮时立即触发云端发布。换宿主时跟随线程当前的评论游标。同一产物在另一线程重新订阅即转移归属。
+
+给 agent 的说明在 [t3-instructions.md](t3-instructions.md)，已放进 Codex、Pi、Antigravity 的全局说明和 `~/.claude/CLAUDE.md`。
 
 ```sh
+ryugi-t3-watch subscribe --project "$PWD" --artifact artboard/layout [--thread THREAD]
+ryugi-t3-watch selection-context --cwd "$PWD" [--host Codex]
 ryugi-t3-watch list
 ryugi-t3-watch status --project "$PWD" --artifact artboard/layout
-ryugi-t3-watch subscribe --project "$PWD" --artifact artboard/layout --thread THREAD --host Codex
 ryugi-t3-watch unsubscribe --project "$PWD" --artifact artboard/layout
 ryugi-t3-watch prune
 ```
