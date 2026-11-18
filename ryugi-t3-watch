@@ -16,12 +16,20 @@ import uuid
 
 LAUNCHCTL = "/bin/launchctl"
 POLL_SECONDS = 2
+RYUGI_PAGE_LIMIT = 100
+FINISHED_STATES = frozenset(("delivered", "cancelled", "expired"))
+
+
+def now_iso():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def run_json(argv):
     result = subprocess.run(argv, capture_output=True, text=True, timeout=15)
     if result.returncode:
-        raise ValueError(f"{Path(argv[0]).name} exited {result.returncode}")
+        detail = (result.stderr or result.stdout or "").strip().splitlines()
+        suffix = f": {detail[-1][:160]}" if detail else ""
+        raise ValueError(f"{Path(argv[0]).name} exited {result.returncode}{suffix}")
     return json.loads(result.stdout)
 
 
@@ -30,6 +38,19 @@ def executable(name):
     if not path:
         raise ValueError(f"Executable unavailable: {name}")
     return os.path.abspath(path)
+
+
+def state_root():
+    root = Path(os.getenv("XDG_STATE_HOME") or Path.home() / ".local/state")
+    return root / "ryugi-t3-watch"
+
+
+def resolve_base(base_dir):
+    return str(base_dir.expanduser().resolve())
+
+
+def t3_binary():
+    return executable(os.getenv("T3CODE_CLI_PATH") or "t3")
 
 
 @contextmanager
@@ -67,8 +88,21 @@ def show(record, count=0):
 
 
 def round_state(record):
-    args = [record["ryugi"], "comment", "list", "--project-dir", record["project"],
-            "--artifact", record["artifact"], "--section", "rounds", "--detail", "--json"]
+    args = [
+        record["ryugi"],
+        "comment",
+        "list",
+        "--project-dir",
+        record["project"],
+        "--artifact",
+        record["artifact"],
+        "--section",
+        "rounds",
+        "--limit",
+        str(RYUGI_PAGE_LIMIT),
+        "--detail",
+        "--json",
+    ]
     cursor = None
     cursors = set()
     while True:
@@ -90,69 +124,135 @@ def launchctl(*args):
     return subprocess.run([LAUNCHCTL, *args], capture_output=True, text=True, timeout=10)
 
 
+def active_jobs():
+    result = launchctl("list")
+    if result.returncode:
+        return None
+    jobs = set()
+    for line in result.stdout.splitlines()[1:]:
+        parts = line.split("\t")
+        if len(parts) >= 3:
+            jobs.add(parts[2])
+    return jobs
+
+
+def is_job_alive(job, jobs_cache=None):
+    if jobs_cache is not None:
+        return job in jobs_cache
+    return launchctl("list", job).returncode == 0
+
+
 def submit_job(directory, record):
-    result = launchctl("submit", "-l", record["job"], "--", sys.executable,
-                       str(Path(__file__).resolve()), "_worker", str(directory), record["job"])
+    result = launchctl(
+        "submit",
+        "-l",
+        record["job"],
+        "--",
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "_worker",
+        str(directory),
+        record["job"],
+    )
     if result.returncode:
         raise ValueError("launchctl submit: " + result.stderr.strip())
 
 
 def notification(record):
-    target = json.dumps({k: record[k] for k in ("project", "artifact", "round")},
-                        ensure_ascii=False)
-    return (f"[ryugi:{record['job']}] 画板轮次已提交。请用裸 ryugi 读取以下目标的最新选择；"
-            f"仍为 submitted 时继续原任务，若已撤回则等待新决定。目标 {target}")
+    target = json.dumps({k: record[k] for k in ("project", "artifact", "round")}, ensure_ascii=False)
+    return (
+        f"[ryugi:{record['job']}] 画板轮次已提交。请用裸 ryugi 读取以下目标的最新选择；"
+        f"仍为 submitted 时继续原任务，若已撤回则等待新决定。目标 {target}"
+    )
+
+
+def record_error(directory, job, message):
+    err = str(message)[:240]
+    with binding(directory) as record:
+        if record.get("job") == job and record.get("state") == "waiting" and record.get("lastError") != err:
+            record["lastError"] = err
+            record["updatedAt"] = now_iso()
+
+
+def clear_error(directory, job):
+    with binding(directory) as record:
+        if record.get("job") == job and "lastError" in record:
+            record.pop("lastError", None)
+            record["updatedAt"] = now_iso()
 
 
 def tick(directory, job):
     with binding(directory) as record:
-        if record.get("job") != job or record["state"] != "waiting":
+        if record.get("job") != job or record.get("state") != "waiting":
             return False
         if time.time() >= record["deadline"]:
             record["state"] = "expired"
+            record["updatedAt"] = now_iso()
             return False
         config = record.copy()
 
     # Preflight the recipient before the final, fresh read of the selection.
     try:
         if round_state(config) != "submitted":
+            if "lastError" in config:
+                clear_error(directory, job)
             return True
         recipient = show(config)["thread"]
         if recipient.get("archived"):
             with binding(directory) as record:
-                if record["job"] == job and record["state"] == "waiting":
+                if record.get("job") == job and record.get("state") == "waiting":
                     record["state"] = "cancelled"
+                    record["updatedAt"] = now_iso()
+                    record.pop("lastError", None)
             return False
         if round_state(config) != "submitted":
+            if "lastError" in config:
+                clear_error(directory, job)
             return True
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         # Temporary errors before sending cannot result in a duplicate delivery.
+        record_error(directory, job, error)
         return True
 
     with binding(directory) as record:
-        if record["job"] != job or record["state"] != "waiting":
+        if record.get("job") != job or record.get("state") != "waiting":
             return False
         if time.time() >= record["deadline"]:
             record["state"] = "expired"
+            record["updatedAt"] = now_iso()
             return False
         record["state"] = "sending"
+        record["updatedAt"] = now_iso()
 
+    err_msg = None
     try:
         receipt = run_json(t3_args(config, "send") + [config["thread"], notification(config)])
-        accepted = (receipt.get("threadId") == config["thread"]
-                    and receipt.get("delivery") in ("started", "queued")
-                    and bool(receipt.get("messageId")))
-    except (FileNotFoundError, PermissionError):
+        accepted = (
+            receipt.get("threadId") == config["thread"]
+            and receipt.get("delivery") in ("started", "queued")
+            and bool(receipt.get("messageId"))
+        )
+    except (FileNotFoundError, PermissionError) as error:
         # exec failed before T3 could accept a message.
         with binding(directory) as record:
             record["state"] = "waiting"
+            record["lastError"] = str(error)[:240]
+            record["updatedAt"] = now_iso()
         return True
-    except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
+    except (OSError, ValueError, subprocess.SubprocessError, AttributeError) as error:
         accepted = False
+        err_msg = str(error)[:240]
+
     with binding(directory) as record:
+        stamp = now_iso()
         record["state"] = "delivered" if accepted else "uncertain"
+        record["updatedAt"] = stamp
         if accepted:
             record["messageId"] = receipt["messageId"]
+            record["deliveredAt"] = stamp
+            record.pop("lastError", None)
+        elif err_msg:
+            record["lastError"] = err_msg
     return False
 
 
@@ -167,15 +267,50 @@ def worker(directory, job):
         while tick(directory, job):
             time.sleep(POLL_SECONDS)
     finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
         launchctl("remove", job)
 
 
 def public(record):
-    keys = ("state", "thread", "project", "artifact", "round", "deadline", "messageId")
-    return {k: record[k] for k in keys if k in record}
+    keys = (
+        "state",
+        "thread",
+        "project",
+        "artifact",
+        "round",
+        "deadline",
+        "messageId",
+        "createdAt",
+        "updatedAt",
+        "deliveredAt",
+        "lastError",
+    )
+    return {k: record[k] for k in keys if record.get(k) is not None}
 
 
-def command(args):
+def resolve_thread(args, t3, base, required=True):
+    current = os.environ.get("T3CODE_THREAD_ID")
+    if current and args.thread and current != args.thread:
+        raise ValueError("--thread differs from the current T3 thread")
+    if current or args.thread:
+        return current or args.thread
+    if not required:
+        return None
+    threads = run_json([t3, "thread", "list", "--base-dir", base, "--json"])
+    running = [item for item in threads if item.get("status") == "running"]
+    if os.environ.get("ANTIGRAVITY_AGENT"):
+        antigravity = [item for item in running if item.get("providerInstanceId") == "antigravity"]
+        if antigravity:
+            running = antigravity
+    if len(running) == 1:
+        return running[0]["threadId"]
+    raise ValueError(
+        f"Supply the current T3 context's thread ID via --thread (found {len(running)} running threads)"
+    )
+
+
+def target_directory(args):
     project = args.project.resolve()
     store = project / ".ryugi/artifacts"
     if args.op == "arm" and not store.is_dir():
@@ -184,67 +319,231 @@ def command(args):
         raise ValueError("Expected a project directory and artboard/<id>")
     if not args.round.strip() or any(ord(c) < 32 for c in args.round):
         raise ValueError("Expected a round ID")
-    current = os.environ.get("T3CODE_THREAD_ID")
-    if current and args.thread and current != args.thread:
-        raise ValueError("--thread differs from the current T3 thread")
-    thread = current or args.thread
-    if not thread:
-        raise ValueError("Supply the current T3 context's thread ID via --thread")
-    base = str(args.base_dir.expanduser().resolve())
     identity = [str(store.resolve()), args.artifact, args.round]
     key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
-    root = Path(os.getenv("XDG_STATE_HOME") or Path.home()/".local/state")
-    directory = root / "ryugi-t3-watch" / key
-    if args.op != "arm" and not (directory/"binding.json").is_file():
-        raise ValueError("No binding for this round")
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with binding(directory) as record:
-        if record and (record["thread"], record["base"]) != (thread, base):
-            raise ValueError("Another T3 thread or instance owns this round")
-        if args.op == "cancel":
-            if record["state"] == "waiting":
-                record["state"] = "cancelled"
-                launchctl("remove", record["job"])
-            return public(record)
-        if args.op == "status":
-            job_alive = launchctl("list", record["job"]).returncode == 0
-            if record["state"] == "sending" and not job_alive:
-                record["state"] = "uncertain"
-            if record["state"] == "uncertain":
-                try:
-                    recent = show(record, count=25)["messages"]
-                except (OSError, ValueError, KeyError, subprocess.SubprocessError):
-                    recent = []
-                for item in recent:
-                    if item.get("role") == "user" and item.get("text") == notification(record):
-                        record["state"] = "delivered"
-                        break
-            result = public(record)
-            result["jobActive"] = job_alive
-            return result
+    return project, state_root() / key
 
-        if record:
-            if record["state"] in ("sending", "uncertain"):
-                raise ValueError("Delivery may already have been accepted; check status")
-            if record["state"] == "waiting" and launchctl("list", record["job"]).returncode == 0:
-                return public(record)
-            if record["state"] == "delivered":
-                if not args.again:
-                    return public(record)
-                if round_state(record) != "open":
-                    raise ValueError("--again requires a reopened round")
-        config = dict(project=str(project), artifact=args.artifact, round=args.round, thread=thread,
-                      base=base, t3=executable(os.getenv("T3CODE_CLI_PATH") or "t3"),
-                      ryugi=executable("ryugi"), path=os.environ["PATH"],
-                      serverHome=os.getenv("RYUGI_SERVER_HOME"))
-        if show(config)["thread"].get("archived"):
-            raise ValueError("Thread is archived")
-        config.update(job="local.ryugi-t3."+uuid.uuid4().hex, state="waiting",
-                      deadline=time.time()+args.ttl)
-        submit_job(directory, config)
-        record.clear()
-        record.update(config)
+
+def reconcile_record(record, jobs_cache=None):
+    job_alive = is_job_alive(record["job"], jobs_cache)
+    if record["state"] == "waiting" and not job_alive and time.time() >= record["deadline"]:
+        record["state"] = "expired"
+        record["updatedAt"] = now_iso()
+    if record["state"] == "sending" and not job_alive:
+        record["state"] = "uncertain"
+        record["updatedAt"] = now_iso()
+    if record["state"] == "uncertain":
+        try:
+            recent = show(record, count=25)["messages"]
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+            recent = []
+        expected = notification(record)
+        for item in recent:
+            if item.get("role") == "user" and item.get("text") == expected:
+                stamp = now_iso()
+                record["state"] = "delivered"
+                record["deliveredAt"] = stamp
+                record["updatedAt"] = stamp
+                record.pop("lastError", None)
+                break
+    if record["state"] in FINISHED_STATES and job_alive:
+        launchctl("remove", record["job"])
+        job_alive = False
+    return job_alive
+
+
+def require_owner(record, thread, base):
+    if record and (record["thread"], record["base"]) != (thread, base):
+        raise ValueError("Another T3 thread or instance owns this round")
+
+
+def cmd_cancel(args):
+    _, directory = target_directory(args)
+    if not (directory / "binding.json").is_file():
+        raise ValueError("No binding for this round")
+    base = resolve_base(args.base_dir)
+    thread = resolve_thread(args, t3_binary(), base)
+    with binding(directory) as record:
+        require_owner(record, thread, base)
+        if record["state"] == "waiting":
+            record["state"] = "cancelled"
+            record["updatedAt"] = now_iso()
+            launchctl("remove", record["job"])
         return public(record)
+
+
+def cmd_status(args):
+    _, directory = target_directory(args)
+    if not (directory / "binding.json").is_file():
+        raise ValueError("No binding for this round")
+    base = resolve_base(args.base_dir)
+    thread = resolve_thread(args, t3_binary(), base, required=False)
+    with binding(directory) as record:
+        if thread:
+            require_owner(record, thread, base)
+        elif record.get("base") != base:
+            raise ValueError("Another T3 instance owns this round")
+        job_alive = reconcile_record(record)
+        result = public(record)
+        result["jobActive"] = job_alive
+        return result
+
+
+def cmd_arm(args):
+    project, directory = target_directory(args)
+    base = resolve_base(args.base_dir)
+    t3 = t3_binary()
+    thread = resolve_thread(args, t3, base)
+    existed = (directory / "binding.json").is_file()
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        with binding(directory) as record:
+            require_owner(record, thread, base)
+            if record:
+                if record["state"] in ("sending", "uncertain"):
+                    raise ValueError("Delivery may already have been accepted; check status")
+                if record["state"] == "waiting" and is_job_alive(record["job"]):
+                    return public(record)
+                if record["state"] == "delivered":
+                    if not args.again:
+                        return public(record)
+                    if round_state(record) != "open":
+                        raise ValueError("--again requires a reopened round")
+            stamp = now_iso()
+            config = dict(
+                project=str(project),
+                artifact=args.artifact,
+                round=args.round,
+                thread=thread,
+                base=base,
+                t3=t3,
+                ryugi=executable("ryugi"),
+                path=os.environ["PATH"],
+                serverHome=os.getenv("RYUGI_SERVER_HOME"),
+                job="local.ryugi-t3." + uuid.uuid4().hex,
+                state="waiting",
+                deadline=time.time() + args.ttl,
+                createdAt=record.get("createdAt", stamp) if record else stamp,
+                updatedAt=stamp,
+            )
+            if show(config)["thread"].get("archived"):
+                raise ValueError("Thread is archived")
+            submit_job(directory, config)
+            record.clear()
+            record.update(config)
+            return public(record)
+    except Exception:
+        if not existed and not (directory / "binding.json").exists():
+            shutil.rmtree(directory, ignore_errors=True)
+        raise
+
+
+def cmd_list(args):
+    root = state_root()
+    if not root.is_dir():
+        return {"items": []}
+    base = resolve_base(args.base_dir)
+    jobs_cache = active_jobs()
+    items = []
+    for entry in sorted(root.iterdir()):
+        file = entry / "binding.json"
+        if not entry.is_dir() or not file.is_file():
+            continue
+        with binding(entry) as record:
+            if not record:
+                continue
+            if not args.all_bases and record.get("base") != base:
+                continue
+            job_alive = reconcile_record(record, jobs_cache)
+            if args.active and record["state"] in FINISHED_STATES:
+                continue
+            item = public(record)
+            item["jobActive"] = job_alive
+            items.append(item)
+    items.sort(key=lambda item: item.get("updatedAt") or item.get("createdAt") or "", reverse=True)
+    return {"items": items}
+
+
+def cmd_prune(args):
+    root = state_root()
+    if not root.is_dir():
+        return {"removed": [], "kept": 0}
+    base = resolve_base(args.base_dir)
+    jobs_cache = active_jobs()
+    removed = []
+    kept = 0
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir():
+            continue
+        file = entry / "binding.json"
+        if not file.is_file():
+            shutil.rmtree(entry, ignore_errors=True)
+            removed.append({"key": entry.name, "reason": "orphan"})
+            continue
+        remove_entry = False
+        summary = None
+        with binding(entry) as record:
+            if not record:
+                remove_entry = True
+                summary = {"key": entry.name, "reason": "empty"}
+            elif not args.all_bases and record.get("base") != base:
+                kept += 1
+            else:
+                job_alive = reconcile_record(record, jobs_cache)
+                if record["state"] in FINISHED_STATES or (args.all and record["state"] == "waiting" and not job_alive):
+                    if job_alive:
+                        launchctl("remove", record["job"])
+                    remove_entry = True
+                    summary = {
+                        "key": entry.name,
+                        "state": record["state"],
+                        "artifact": record.get("artifact"),
+                        "round": record.get("round"),
+                    }
+                else:
+                    kept += 1
+        if remove_entry:
+            shutil.rmtree(entry, ignore_errors=True)
+            removed.append(summary)
+    return {"removed": removed, "kept": kept}
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog=(
+            "Use the bare ryugi CLI for a fresh bridge artboard. Arm a new round before sharing it. "
+            "Example: ryugi-t3-watch arm --artifact artboard/settings --round layout"
+        ),
+    )
+    subs = parser.add_subparsers(dest="op", required=True)
+    default_base = Path(os.getenv("T3CODE_HOME") or "~/.t3")
+
+    for op, help_text in [
+        ("arm", "Bind the current thread and wait for a submission"),
+        ("status", "Inspect this binding and reconcile an uncertain receipt"),
+        ("cancel", "Stop waiting for this round"),
+    ]:
+        p = subs.add_parser(op, help=help_text)
+        p.add_argument("--project", type=Path, default=Path.cwd(), help="Ryugi project root")
+        p.add_argument("--artifact", required=True, metavar="artboard/ID")
+        p.add_argument("--round", required=True, metavar="ID")
+        p.add_argument("--thread", help="Current thread ID if not provided by T3")
+        p.add_argument("--base-dir", type=Path, default=default_base)
+        if op == "arm":
+            p.add_argument("--ttl", type=int, default=86400, help="Seconds to wait (default 86400)")
+            p.add_argument("--again", action="store_true", help="Rearm a delivered, reopened round")
+
+    list_p = subs.add_parser("list", help="List tracked round bindings")
+    list_p.add_argument("--active", action="store_true", help="Only show non-finished bindings")
+    list_p.add_argument("--all-bases", action="store_true", help="Include bindings from other T3 base dirs")
+    list_p.add_argument("--base-dir", type=Path, default=default_base)
+
+    prune_p = subs.add_parser("prune", help="Remove finished bindings and orphan state directories")
+    prune_p.add_argument("--all", action="store_true", help="Also remove dead waiting bindings")
+    prune_p.add_argument("--all-bases", action="store_true", help="Prune across all T3 base dirs")
+    prune_p.add_argument("--base-dir", type=Path, default=default_base)
+    return parser
 
 
 def main():
@@ -252,26 +551,18 @@ def main():
     if len(sys.argv) == 4 and sys.argv[1] == "_worker":
         worker(Path(sys.argv[2]), sys.argv[3])
         return
-    parser = argparse.ArgumentParser(description=__doc__, epilog=(
-        "Use the bare ryugi CLI for a fresh bridge artboard. Arm a new round before sharing it. "
-        "Example: ryugi-t3-watch arm --artifact artboard/settings --round layout"))
-    subs = parser.add_subparsers(dest="op", required=True)
-    for op, help_text in [("arm","Bind the current thread and wait for a submission"),
-                          ("status","Inspect this binding and reconcile an uncertain receipt"),
-                          ("cancel","Stop waiting for this round")]:
-        p = subs.add_parser(op, help=help_text)
-        p.add_argument("--project", type=Path, default=Path.cwd(), help="Ryugi project root")
-        p.add_argument("--artifact", required=True, metavar="artboard/ID")
-        p.add_argument("--round", required=True, metavar="ID")
-        p.add_argument("--thread", help="Current thread ID if not provided by T3")
-        p.add_argument("--base-dir", type=Path, default=Path(os.getenv("T3CODE_HOME") or "~/.t3"))
-        if op == "arm":
-            p.add_argument("--ttl", type=int, default=86400, help="Seconds to wait (default 86400)")
-            p.add_argument("--again", action="store_true", help="Rearm a delivered, reopened round")
+    parser = build_parser()
     args = parser.parse_args()
     if args.op == "arm" and args.ttl <= 0:
         parser.error("--ttl must be positive")
-    print(json.dumps(command(args), ensure_ascii=False))
+    handlers = {
+        "arm": cmd_arm,
+        "status": cmd_status,
+        "cancel": cmd_cancel,
+        "list": cmd_list,
+        "prune": cmd_prune,
+    }
+    print(json.dumps(handlers[args.op](args), ensure_ascii=False))
 
 
 if __name__ == "__main__":
