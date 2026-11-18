@@ -66,7 +66,7 @@ function context(input) {
     if (!goal) continue;
     if (args.some((w) => w.includes("$")))
       notes.push(
-        `ryugi-t3-watch: 命令里有变量，没能确定 ${goal.artifact} 的项目目录。运行 ryugi-t3-watch subscribe --project <项目目录> --artifact ${goal.artifact}，反馈才会送回这个线程。`,
+        `ryugi-t3-watch: 项目目录含变量，未能订阅 ${goal.artifact}。运行 ryugi-t3-watch subscribe --project <项目目录> --artifact ${goal.artifact} 补订。`,
       );
     else notes.push(autosub.subscribe(goal, cwd));
   }

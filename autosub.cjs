@@ -31,13 +31,13 @@ function subscribe({ artifact, project }, cwd) {
   );
   if (r.status === 0)
     return (
-      `ryugi-t3-watch: 已订阅 ${artifact}，提交和评论会自动送回本线程。` +
-      `用户指代产物里的某处却没说是哪（「这里」「这个按钮」）时，先运行 ryugi-t3-watch selection-context --cwd ${JSON.stringify(project)} 读查看器里的选区；输出为空再问用户指的是哪里。`
+      `ryugi-t3-watch: 已订阅 ${artifact}，反馈自动送回本线程。` +
+      `用户指代产物某处（如「这里」）却没说是哪时，先运行 ryugi-t3-watch selection-context --cwd ${JSON.stringify(project)}，无输出再问用户。`
     );
   // A sandboxed shell (Codex workspace-write) cannot write the bridge state or reach launchd.
   return (
-    `ryugi-t3-watch: 没能自动订阅 ${artifact}，反馈不会送回这个线程。在沙盒外运行 ` +
-    `ryugi-t3-watch subscribe --project ${JSON.stringify(project)} --artifact ${artifact} 重试，仍失败就把原因告诉用户：\n` +
+    `ryugi-t3-watch: 未能订阅 ${artifact}，反馈到不了本线程。到沙盒外运行 ` +
+    `ryugi-t3-watch subscribe --project ${JSON.stringify(project)} --artifact ${artifact}；仍失败就把下面的原因告诉用户：\n` +
     (r.stderr || String(r.error || "")).trim()
   );
 }
