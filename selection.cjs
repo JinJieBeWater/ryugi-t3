@@ -183,9 +183,9 @@ function selectionContext(project, session, host, prompt = "", sessionId = "", t
   const elsewhere = [...byProject].map(([other, artifacts]) =>
     commentReminders(other, path.join(other, ".ryugi/artifacts"), host, artifacts),
   );
+  // Unread counts are per host review key; without one every comment would look unread.
   const reminders = [
-    commentReminders(project, root, host),
-    ...elsewhere,
+    ...(host ? [commentReminders(project, root, host), ...elsewhere] : []),
     autoPublishContext(project, process.env, sessionId),
   ]
     .filter(Boolean)

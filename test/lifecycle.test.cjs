@@ -129,3 +129,25 @@ test("reminds the owning thread about an explicit project-dir outside its git wo
     /slides\/explicit/,
   );
 });
+test("selection-context without --host prints selections but no unread reminders", (t) => {
+  const f = fixture(t),
+    state = path.join(f.root, ".state");
+  put(path.join(state, "server-info"), {});
+  put(path.join(state, "whiteboard/w/selection.json"), {
+    selected: [{ id: "shape", type: "rect", text: "rectangle" }],
+  });
+  put(path.join(f.root, "document/d/comments.json"), {
+    threads: [
+      {
+        id: "x",
+        status: "open",
+        anchor: {},
+        messages: [{ id: "m", at: "2026-01-01", author: "human", text: "already read" }],
+      },
+    ],
+  });
+  assert.match(f.run(["selection-context", "--host", "pi"]), /Unread comment evidence/);
+  const text = f.run(["selection-context"]);
+  assert.match(text, /shape rect "rectangle"/);
+  assert.doesNotMatch(text, /Unread comment evidence/);
+});
