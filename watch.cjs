@@ -1,14 +1,15 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { spawnSync, execFileSync } = require("node:child_process");
 const { setTimeout: sleep } = require("node:timers/promises");
 const { randomUUID } = require("node:crypto");
 const { projectRoot, aliveFile, beat, subscriptionFile, app } = require("./upstream.cjs");
 const { unreadCount } = app("comment-watch");
 const { postToServer } = app("agent-event");
-const { atomic, stateRoot, locked, load, label } = require("./store.cjs");
-const { scan, emptyBaseline } = require("./events.cjs");
+const { atomic, stateRoot, locked, load, label, launch } = require("./store.cjs");
+const { scan, emptyBaseline, render } = require("./events.cjs");
+const { transport, call, show } = require("./t3.cjs");
+const { fingerprint } = require("./doctor.cjs");
 const watchId = "ryugi-t3-watch";
 const artifactPattern = /^(?:document|artboard|whiteboard|slides)\/[a-z0-9][a-z0-9-]*$/;
 const keys = {
@@ -74,30 +75,6 @@ function syncProjectHeartbeat(project, subscriptions, now = Date.now()) {
     return false;
   }
 }
-const transport = () => ({
-  base: path.resolve(process.env.T3CODE_HOME || path.join(os.homedir(), ".t3")),
-  t3: process.env.T3CODE_CLI_PATH || path.join(os.homedir(), ".t3/bin/t3"),
-});
-function call(record, op, ...args) {
-  const out = execFileSync(
-    record.t3,
-    ["thread", op, "--base-dir", record.base, "--json", ...args],
-    {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 5000,
-      killSignal: "SIGKILL",
-      maxBuffer: 16 * 1024 * 1024,
-    },
-  );
-  return JSON.parse(out);
-}
-function show(r, n) {
-  const detail = call(r, "show", "--messages", String(n), r.thread);
-  if (detail.thread?.threadId !== r.thread) throw new Error("T3 returned a different thread");
-  return detail;
-}
-const launch = (...args) => spawnSync("/bin/launchctl", args, { encoding: "utf8", timeout: 5000 });
 function ensureJob() {
   if (launch("list", label).status === 0) return;
   const r = launch(
@@ -109,6 +86,9 @@ function ensureJob() {
     "HOME=" + os.homedir(),
     "PATH=" + (process.env.PATH || ""),
     "XDG_STATE_HOME=" + path.dirname(stateRoot),
+    ...(process.env.RYUGI_T3_WATCH_PLUGIN
+      ? ["RYUGI_T3_WATCH_PLUGIN=" + process.env.RYUGI_T3_WATCH_PLUGIN]
+      : []),
     process.execPath,
     path.join(__dirname, "cli.cjs"),
     "worker",
@@ -185,6 +165,8 @@ function backoff(item) {
   item.retryAt = Date.now() + Math.min(60000, 1000 * 2 ** Math.min(6, item.attempts - 1));
 }
 function deliver(r, db, save) {
+  // A submit still waiting for its brief keeps its place ahead of later feedback.
+  if (r.pending.some((item) => item.render)) return;
   const preceding = new Set();
   const index = r.pending.findIndex((item) => {
     const duplicate = preceding.has(item.text);
@@ -242,12 +224,29 @@ function deliver(r, db, save) {
   }
   save();
 }
-async function worker() {
+// Fills in a submit brief outside the store lock, since Ryugi's list command can take 15 s.
+function renderPending(entry) {
+  for (const item of entry.pending) {
+    if (!item.render) continue;
+    const text = render(item.render);
+    locked((db, save) => {
+      const r = find(db, entry);
+      const target = r?.generation === entry.generation && r.pending.find((x) => x.id === item.id);
+      if (!target?.render) return;
+      target.text = text;
+      delete target.render;
+      save();
+    });
+  }
+}
+// print is the plugin fingerprint doctor passed; any change restarts the worker under launchd.
+async function worker(print) {
   let lastActive = Date.now();
   const cache = new Map(),
     statuses = new Map(),
     trackedProjects = new Set();
   while (true) {
+    if (fingerprint() !== print) process.exit(75);
     const snapshot = load().subscriptions;
     for (const entry of snapshot) trackedProjects.add(entry.project);
     for (const entry of snapshot) {
@@ -282,13 +281,16 @@ async function worker() {
           const before = JSON.stringify(r.baseline);
           const host = keys[cached.thread.providerInstanceId] || r.hostReviewKey;
           const changes = scan(r.project, r.artifact, host, r.baseline);
-          for (const event of changes) r.pending.push({ ...event, state: "ready" });
+          for (const event of changes)
+            r.pending.push({ ...event, id: randomUUID(), state: "ready" });
           if (changes.length || JSON.stringify(r.baseline) !== before) {
             lastActive = Date.now();
             save();
           }
           deliver(r, db, save);
         });
+        const latest = find(load(), entry);
+        if (latest?.generation === entry.generation) renderPending(latest);
       } catch (e) {
         // Re-read on the next pass. Keep the last good baseline after a partial file write.
         cache.delete(cacheKey);

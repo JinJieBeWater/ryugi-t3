@@ -46,4 +46,5 @@ function locked(fn) {
     fs.rmSync(lock, { force: true });
   }
 }
-module.exports = { atomic, load, locked, stateRoot, label };
+const launch = (...args) => spawnSync("/bin/launchctl", args, { encoding: "utf8", timeout: 5000 });
+module.exports = { atomic, load, locked, stateRoot, label, launch };

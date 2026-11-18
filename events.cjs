@@ -19,34 +19,45 @@ const emptyBaseline = () => ({
   seenComments: {},
 });
 const quote = (s) => "'" + s.replaceAll("'", "'\"'\"'") + "'";
+const sections = {
+  choices: ["groups", "--kind", "choose"],
+  answers: ["asks", "--status", "submitted"],
+  comments: ["threads"],
+};
+// Same argv Ryugi's own watcher builds for its inline submit brief.
+const listArgv = (project, artifact, kind) => [
+  path.join(plugin, "skills/artifacts/app/ryugi.cjs"),
+  "comment",
+  "list",
+  "--section",
+  ...sections[kind],
+  "--detail",
+  "--format",
+  "brief",
+  "--project-dir",
+  project,
+  "--artifact",
+  artifact,
+];
+// Runs Ryugi's list command for up to 15 s; a failed read keeps the Run command.
+const render = (event) => wakeMessage(event, Infinity);
 
 function scan(project, artifact, host, baseline, initial = false) {
   const root = path.join(project, ".ryugi/artifacts");
   const state = path.join(root, ".state", artifact);
   const file = read(path.join(root, artifact, "comments.json"));
   const threads = file?.threads ?? [];
-  const commands = {
-    choices: "groups --kind choose",
-    answers: "asks --status submitted",
-    comments: "threads",
-  };
   const messages = [];
   function emit(kind, fields) {
     if (initial) return;
-    const launcher = path.join(plugin, "skills/artifacts/app/ryugi.cjs");
-    const command =
-      "node " +
-      quote(launcher) +
-      " comment list --section " +
-      commands[kind] +
-      " --detail --format brief --project-dir " +
-      quote(project) +
-      " --artifact " +
-      artifact;
-    messages.push({
-      kind,
-      text: wakeMessage({ type: "ryugi-" + kind, artifact, command, ...fields }, 500),
-    });
+    const argv = listArgv(project, artifact, kind);
+    const paths = new Set([argv[0], project]);
+    const command = ["node", ...argv].map((x) => (paths.has(x) ? quote(x) : x)).join(" ");
+    const event = { type: "ryugi-" + kind, artifact, command, ...fields };
+    const message = { kind, text: wakeMessage(event, 500) };
+    // T3 has no length cap, so a submit gets its brief inline once rendered outside the store lock.
+    if (kind !== "comments" && !fields.withdrawn) message.render = { ...event, argv };
+    messages.push(message);
   }
   const rounds = artifact.startsWith("artboard/")
     ? (read(path.join(state, "rounds.json"))?.rounds ?? [])
@@ -160,4 +171,4 @@ function scan(project, artifact, host, baseline, initial = false) {
   }
   return messages;
 }
-module.exports = { emptyBaseline, scan };
+module.exports = { emptyBaseline, scan, render, listArgv };

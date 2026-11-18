@@ -350,3 +350,35 @@ test("subscribe on an artifact type without feedback says no subscription is nee
   assert.match(r.stderr, /document、artboard、whiteboard、slides/);
   assert.match(r.stderr, /verify\/report 不需要订阅/);
 });
+test("a submit brief renders outside the store lock and is sent inline, ahead of later feedback", async (t) => {
+  const f = fixture(t),
+    a = "artboard/inline",
+    started = path.join(f.dir, "render-started");
+  f.json("subscribe", "--artifact", a);
+  f.launch("remove", f.label);
+  await until(() => f.launch("list", f.label).status !== 0);
+  // A killed worker can leave a submit that was detected but never rendered.
+  const dbFile = path.join(f.state, "subscriptions.json"),
+    db = JSON.parse(fs.readFileSync(dbFile));
+  const slow = `require('fs').writeFileSync(${JSON.stringify(started)},'');setTimeout(()=>console.log('BRIEF a\\nBRIEF b'),4000)`;
+  db.subscriptions[0].pending = [
+    {
+      id: "p1",
+      kind: "choices",
+      state: "ready",
+      text: "bounded fallback",
+      render: { type: "ryugi-choices", artifact: a, round: "r", groups: 1, command: "x", argv: ["-e", slow] },
+    },
+  ];
+  put(dbFile, db);
+  f.json("subscribe", "--artifact", a);
+  await until(() => fs.existsSync(started));
+  put(path.join(f.root, a, "comments.json"), { threads: [thread("later", "after submit")] });
+  const t0 = Date.now();
+  f.json("subscribe", "--artifact", "document/other");
+  assert.ok(Date.now() - t0 < 2500, "subscribe waited on the render");
+  await until(() => f.sent().length === 2);
+  assert.match(f.sent()[0].text, /^Ryugi choices artboard\/inline round r submitted.*\nBRIEF a\nBRIEF b$/s);
+  assert.match(f.sent()[1].text, /after submit/);
+  await until(() => f.json("status", "--artifact", a).pending.length === 0);
+});
