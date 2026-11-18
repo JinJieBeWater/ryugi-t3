@@ -2,7 +2,13 @@
 
 T3 线程里的 agent 运行 `ryugi start --artifact artboard/layout` 后，接着运行 `ryugi-t3-watch subscribe`，之后的提交、撤回和人类评论会送回这个线程。线程 ID 取自 `--thread` 或 T3 注入的 `T3CODE_THREAD_ID`（Claude、Codex、Pi、Antigravity 都有）；都没有时报错并提示用 `orchestrator_capabilities` 的 `parentThreadId` 重试。不需要任何宿主 hook 或扩展。订阅期间，项目里所有 Ryugi 原生订阅都会去掉这个产物，反馈只由 T3 投递一次；线程结束一轮时立即触发云端发布。换宿主时跟随线程当前的评论游标。同一产物在另一线程重新订阅即转移归属。
 
-给 agent 的说明在 [t3-instructions.md](t3-instructions.md)，已放进 Codex、Pi、Antigravity 的全局说明和 `~/.claude/CLAUDE.md`。
+给 agent 的说明在 [t3-instructions.md](t3-instructions.md)，只给 T3 线程，不进各宿主的全局说明：
+
+- Claude、Pi：`~/.t3/userdata/settings.json` 里 `providerInstances.<id>.config.launchArgs` 分别用 `--append-system-prompt-file` 和 `--append-system-prompt` 指向这个文件。
+- Codex：同一位置用 `-c 'developer_instructions="…"'` 内联全文，改了这个文件要同步改那里。
+- Antigravity：写在 `~/my/pi-stuff/config/antigravity/agents/lean.md` 正文；T3 的包装脚本给每个会话加 `--agent lean`。
+
+改 launchArgs 后，已启动的 Codex app-server 和已有会话要重启才会读到。
 
 ```sh
 ryugi-t3-watch subscribe --project "$PWD" --artifact artboard/layout [--thread THREAD]
