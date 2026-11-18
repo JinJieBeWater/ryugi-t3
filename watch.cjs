@@ -11,6 +11,7 @@ const { scan, emptyBaseline, render } = require("./events.cjs");
 const { transport, call, show } = require("./t3.cjs");
 const { fingerprint } = require("./doctor.cjs");
 const watchId = "ryugi-t3-watch";
+const idlePoll = 20000;
 const artifactPattern = /^(?:document|artboard|whiteboard|slides)\/[a-z0-9][a-z0-9-]*$/;
 const keys = {
   antigravity: "Antigravity",
@@ -254,7 +255,11 @@ async function worker(print) {
       let cached = cache.get(cacheKey);
       try {
         if (!cached || cached.until < Date.now()) {
-          cached = { thread: show(entry, 0).thread, until: Date.now() + 2000 };
+          const thread = show(entry, 0).thread;
+          // Each T3 CLI call costs ~0.25 s CPU, so an idle thread with nothing to send is checked slowly.
+          // Comments are still noticed every pass; only archive cleanup and turn-end flush wait.
+          const busy = thread.status === "running" || entry.pending.length > 0;
+          cached = { thread, until: Date.now() + (busy ? 2000 : idlePoll) };
           cache.set(cacheKey, cached);
           // A finished turn publishes now instead of waiting for Ryugi's idle timer.
           const was = statuses.get(cacheKey);
@@ -267,17 +272,17 @@ async function worker(print) {
               void postToServer(project, "/api/cloud/flush");
           }
         }
-        locked((db, save) => {
+        const queued = locked((db, save) => {
           const r = find(db, entry);
-          if (r?.generation !== entry.generation) return;
+          if (r?.generation !== entry.generation) return false;
           if (cached.thread.archived) {
             db.subscriptions = db.subscriptions.filter(
               (s) => s.base !== r.base || s.thread !== r.thread,
             );
             save();
-            return;
+            return false;
           }
-          if (r.deadline <= Date.now()) return;
+          if (r.deadline <= Date.now()) return false;
           const before = JSON.stringify(r.baseline);
           const host = keys[cached.thread.providerInstanceId] || r.hostReviewKey;
           const changes = scan(r.project, r.artifact, host, r.baseline);
@@ -288,7 +293,10 @@ async function worker(print) {
             save();
           }
           deliver(r, db, save);
+          return changes.length > 0;
         });
+        // Sending new feedback starts a turn; watch it closely so its end still triggers the flush.
+        if (queued) cache.delete(cacheKey);
         const latest = find(load(), entry);
         if (latest?.generation === entry.generation) renderPending(latest);
       } catch (e) {

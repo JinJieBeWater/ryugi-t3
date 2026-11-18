@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { setTimeout: sleep } = require("node:timers/promises");
 const { locked, label, launch } = require("./store.cjs");
-const { call } = require("./t3.cjs");
+const { call, show } = require("./t3.cjs");
 const plugin = require("./plugin.cjs");
 const appDir = path.join(plugin, "skills/artifacts/app");
 const modules = ["comment-subscriptions", "comment-watch", "comment-threads", "agent-event"];
@@ -144,26 +144,45 @@ const failures = (report) =>
 async function paused(report, print) {
   const notice = `ryugi-t3-watch 已暂停转发 Ryugi 反馈：Ryugi ${report.version || "?"} 未通过兼容自检（${failures(report)}）。请告诉用户运行 \`ryugi-t3-watch doctor\` 查看。修好或回退 Ryugi 后自动恢复，期间的反馈不会丢。`;
   const key = print + "\n" + failures(report);
+  const route = (r) => JSON.stringify([r.base, r.thread]);
+  // Records the outcome on every subscription of that thread, so a thread gets one notice.
+  const mark = (target, fields) =>
+    locked((db, save) => {
+      for (const r of db.subscriptions) if (route(r) === route(target)) Object.assign(r, fields);
+      save();
+    });
   while (true) {
     if (fingerprint() !== print) process.exit(75);
-    const targets = locked((db, save) => {
+    const targets = locked((db) => {
       const now = Date.now(),
         active = db.subscriptions.filter((r) => r.deadline > now);
       if (!active.length) {
         launch("remove", label);
         return null;
       }
-      const fresh = active.filter((r) => r.notice !== key);
-      // Marked before sending: at most one notice per thread and failure.
-      for (const r of fresh) r.notice = key;
-      if (fresh.length) save();
-      return [...new Map(fresh.map((r) => [JSON.stringify([r.base, r.thread]), r])).values()];
+      const due = active.filter(
+        (r) => r.notice !== key && !(r.noticeTry?.key === key && r.noticeTry.at > now),
+      );
+      return [...new Map(due.map((r) => [route(r), r])).values()];
     });
     if (!targets) return;
     for (const r of targets) {
       try {
-        call(r, "send", r.thread, notice);
-      } catch {}
+        // A send without a receipt may still have landed; the thread decides before resending.
+        if (
+          r.noticeTry?.key === key &&
+          show(r, 50).messages.some((m) => m.role === "user" && m.text === notice)
+        ) {
+          mark(r, { notice: key, noticeTry: undefined });
+          continue;
+        }
+        mark(r, { noticeTry: { key, at: Date.now() + 5000 } });
+        const ack = call(r, "send", r.thread, notice);
+        if (ack.threadId === r.thread && ack.messageId)
+          mark(r, { notice: key, noticeTry: undefined });
+      } catch {
+        // Retried after noticeTry.at.
+      }
     }
     await sleep(2000);
   }

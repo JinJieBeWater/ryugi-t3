@@ -48,6 +48,7 @@ function fixture(t) {
     if(command==='list') result=config.filter(t=>t.listed!==false);
     if(command==='show'){
       const thread=config.find(x=>x.threadId===args.at(-1)); if(!thread)process.exit(2);
+      fs.appendFileSync(p.join(d,'shows'),args[args.indexOf('--messages')+1]+'\\n');
       if(args[args.indexOf('--messages')+1]==='50' && fs.existsSync(p.join(d,'uninstall-once'))){
         fs.unlinkSync(p.join(d,'uninstall-once'));fs.renameSync(__filename,__filename+'.offline');
       }
@@ -99,6 +100,11 @@ function fixture(t) {
     fs.existsSync(path.join(dir, "sent"))
       ? fs.readFileSync(path.join(dir, "sent"), "utf8").trim().split("\n").map(JSON.parse)
       : [];
-  return { dir, project, root, state, label, launch, env, threads, run, json, sent, mock };
+  // How many times the worker asked T3 for a thread, by --messages count.
+  const shows = (n) =>
+    fs.existsSync(path.join(dir, "shows"))
+      ? fs.readFileSync(path.join(dir, "shows"), "utf8").split("\n").filter((x) => x === String(n)).length
+      : 0;
+  return { dir, project, root, state, label, launch, env, threads, run, json, sent, mock, shows };
 }
 module.exports = { fixture, until, put, read, cli };

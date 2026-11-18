@@ -324,6 +324,33 @@ test("worker flushes the project once when its subscribed thread stops running",
   await new Promise((r) => setTimeout(r, 3000));
   assert.deepEqual(hits, [encodeURIComponent(f.project)]);
 });
+test("an idle thread is rarely asked about, yet a new comment is sent at once and its turn is watched", async (t) => {
+  const f = fixture(t),
+    a = "document/idle",
+    file = path.join(f.root, a, "comments.json");
+  f.threads[0].status = "completed";
+  put(path.join(f.dir, "threads"), f.threads);
+  put(file, { threads: [] });
+  f.json("subscribe", "--artifact", a);
+  await new Promise((r) => setTimeout(r, 6000));
+  assert.ok(f.shows(0) <= 1, "idle polls: " + f.shows(0));
+  const asked = f.shows(0),
+    at = Date.now();
+  put(file, {
+    threads: [
+      {
+        id: "t",
+        anchor: {},
+        status: "open",
+        messages: [{ id: "m", at: "2026-01-01", text: "idle comment", author: "human" }],
+      },
+    ],
+  });
+  await until(() => f.sent().length === 1);
+  assert.ok(Date.now() - at < 4000);
+  assert.match(f.sent()[0].text, /idle comment/);
+  await until(() => f.shows(0) > asked, 4000);
+});
 test("a store written by the hook era keeps working and drops its session bindings", (t) => {
   const f = fixture(t),
     store = path.join(f.state, "subscriptions.json");

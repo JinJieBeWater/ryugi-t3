@@ -14,9 +14,11 @@ ryugi-t3-watch prune
 ryugi-t3-watch doctor
 ```
 
-`doctor` 检查 Ryugi 插件是否仍提供桥接借用的接口，并用一个临时项目对照 Ryugi 原生 watcher 和桥接的提醒文本与命令参数，每次升级 Ryugi 后可以手动运行。`subscribe` 和 worker 启动时也会自动运行：自检不通过时 `subscribe` 报错且不订阅；worker 暂停转发，给每个已订阅的线程发一条说明，反馈留在 Ryugi 文件里不丢。插件文件一变，worker 就退出，由 launchd 拉起后重新自检，修好或回退 Ryugi 后自动恢复。
+`doctor` 检查 Ryugi 插件是否仍提供桥接借用的接口，并用一个临时项目对照 Ryugi 原生 watcher 和桥接的提醒文本与命令参数，每次升级 Ryugi 后可以手动运行。`subscribe` 和 worker 启动时也会自动运行：自检不通过时 `subscribe` 报错且不订阅；worker 暂停转发，给每个已订阅的线程发一条说明（没拿到回执时先核对线程再重发，每 5 秒一次，直到送达），反馈留在 Ryugi 文件里不丢。插件文件一变，worker 就退出，由 launchd 拉起后重新自检，修好或回退 Ryugi 后自动恢复。
 
 提交和回答的提醒会内联 Ryugi 的 `comment list --format brief` 结果（Ryugi 1.86 起原生宿主也这么做），agent 不必再跑一次命令。这条命令最多 15 秒，在存储锁外执行，执行完之前同一订阅的后续反馈排在它后面。Ryugi 服务器没在运行时读取失败，提醒退回附带 Run 命令的写法。评论提醒保持原样。
+
+每次调用 T3 CLI 约耗 0.25 秒 CPU，所以线程空闲且没有待发消息时每 20 秒才查一次线程状态，线程在跑或有待发消息时每 2 秒一次；评论照常每轮扫描、立即投递，投递后转回 2 秒以便回合结束时触发发布。归档清理和用户自己发起的短回合的发布最多晚 20 秒。
 
 首次订阅记录现状，续订保留基线并延期（默认七天，`--ttl` 单位秒）。macOS 的单个按需 launchd 作业按状态目录隔离，空表后退出。状态保存在 `${XDG_STATE_HOME:-~/.local/state}/ryugi-t3-watch`。投递回执不明时核对最近 50 条消息，保留未确认记录供 `status` 查看。
 

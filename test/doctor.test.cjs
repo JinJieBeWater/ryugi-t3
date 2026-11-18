@@ -70,11 +70,22 @@ test("an upgrade that breaks the bridge pauses delivery with one notice and resu
   f.json("subscribe", "--artifact", a);
   put(file, { threads: [thread("one", "before upgrade")] });
   await until(() => f.sent().length === 1);
+  const flag = (name, on) =>
+    on ? fs.writeFileSync(path.join(f.dir, name), "") : fs.rmSync(path.join(f.dir, name));
+  flag("drop", true);
   copy.breakIt();
-  // The worker notices the changed plugin, restarts under launchd and reports once.
-  await until(() => f.sent().length === 2, 30000);
+  // The worker notices the changed plugin, restarts under launchd and tries to report.
+  await until(() => f.json("list")[0].noticeTry, 30000);
+  assert.equal(f.sent().length, 1);
+  // A failed send is retried; one that landed without a receipt is found and not repeated.
+  flag("drop", false);
+  flag("lose", true);
+  await until(() => f.sent().length === 2, 15000);
   assert.match(f.sent()[1].text, /ryugi-t3-watch doctor/);
   assert.match(f.sent()[1].text, /wakeMessage/);
+  flag("lose", false);
+  await until(() => f.json("list")[0].notice, 15000);
+  assert.equal(f.sent().length, 2);
   put(file, { threads: [thread("one", "before upgrade"), thread("two", "while broken")] });
   await new Promise((r) => setTimeout(r, 4000));
   assert.equal(f.sent().length, 2);
