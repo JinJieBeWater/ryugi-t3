@@ -129,47 +129,15 @@ function identity(opts) {
 }
 const find = (db, key) =>
   db.subscriptions.find((r) => r.project === key.project && r.artifact === key.artifact);
-// Antigravity runs commands inside agy, which does not inherit T3CODE_THREAD_ID.
-// The caller is running, so a single running Antigravity thread in this project is it.
-function antigravityThread(route, project) {
-  let rows = [],
-    failure = "";
-  try {
-    rows = call(route, "list", "--project", project);
-  } catch (e) {
-    failure = e.message;
-  }
-  const ids = rows
-    .filter((r) => r.providerInstanceId === "antigravity" && r.status === "running" && !r.archived)
-    .filter((r) => {
-      try {
-        const where =
-          r.worktreePath === undefined
-            ? show({ ...route, thread: r.threadId }, 0).thread.worktreePath
-            : r.worktreePath;
-        if (!where) return true;
-        // The artifact project may be a subdirectory of the thread's checkout.
-        const rel = path.relative(projectRoot(where), project);
-        return rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel);
-      } catch {
-        return false;
-      }
-    })
-    .map((r) => r.threadId);
-  return { thread: ids.length === 1 ? ids[0] : null, failure };
-}
 function subscribe(opts) {
   const key = identity(opts);
   const route = transport();
   route.base = path.resolve(opts["base-dir"] || route.base);
-  let thread = opts.thread || process.env.T3CODE_THREAD_ID,
-    failure = "";
-  if (!thread) ({ thread, failure } = antigravityThread(route, key.project));
+  const thread = opts.thread || process.env.T3CODE_THREAD_ID;
   if (!thread)
     throw new Error(
-      "这个 shell 里没有 T3 线程 ID。在 T3 线程里（例如 Antigravity）时，先调用 T3 工具 orchestrator_capabilities，用返回的 parentThreadId 重试：ryugi-t3-watch subscribe --thread <parentThreadId> --artifact " +
-        key.artifact +
-        (failure ? "\n（查找 Antigravity 线程时 t3 thread list 失败：" + failure + "）" : ""),
+      "这个 shell 里没有 T3 线程 ID。在 T3 线程里（例如 Grok）时，先调用 T3 工具 orchestrator_capabilities，用返回的 parentThreadId 重试：ryugi-t3-watch subscribe --thread <parentThreadId> --artifact " +
+        key.artifact,
     );
   const ttl = Number(opts.ttl ?? 7 * 86400);
   if (!Number.isFinite(ttl) || ttl <= 0) throw new Error("Expected positive TTL in seconds");
