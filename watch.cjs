@@ -7,6 +7,7 @@ const { randomUUID } = require("node:crypto");
 const { artifactPattern } = require("./parser.cjs");
 const { projectRoot, aliveFile, beat, subscriptionFile, app } = require("./upstream.cjs");
 const { unreadCount } = app("comment-watch");
+const { postToServer } = app("agent-event");
 const { atomic, stateRoot, locked, load, label } = require("./store.cjs");
 const { scan, emptyBaseline } = require("./events.cjs");
 const watchId = "ryugi-t3-watch";
@@ -262,6 +263,7 @@ function deliver(r, db, save) {
 async function worker() {
   let lastActive = Date.now();
   const cache = new Map(),
+    statuses = new Map(),
     trackedProjects = new Set();
   while (true) {
     const snapshot = load().subscriptions;
@@ -273,6 +275,16 @@ async function worker() {
         if (!cached || cached.until < Date.now()) {
           cached = { thread: show(entry, 0).thread, until: Date.now() + 2000 };
           cache.set(cacheKey, cached);
+          // A finished turn publishes now instead of waiting for Ryugi's idle timer.
+          const was = statuses.get(cacheKey);
+          statuses.set(cacheKey, cached.thread.status);
+          if (was === "running" && cached.thread.status !== "running") {
+            const owned = snapshot.filter(
+              (s) => s.base === entry.base && s.thread === entry.thread,
+            );
+            for (const project of new Set(owned.map((s) => s.project)))
+              void postToServer(project, "/api/cloud/flush");
+          }
         }
         locked((db, save) => {
           const r = find(db, entry);

@@ -308,3 +308,25 @@ test("without a thread id subscribe binds the only running Antigravity thread of
   assert.match(r.stderr, /orchestrator_capabilities/);
   assert.ok(!f.json("list").some((s) => s.artifact === "artboard/ambiguous"));
 });
+test("worker flushes the project once when its subscribed thread stops running", async (t) => {
+  const f = fixture(t),
+    http = require("node:http"),
+    hits = [];
+  const server = http.createServer((req, res) => {
+    if (req.url.startsWith("/api/cloud/flush")) hits.push(req.headers["x-ryugi-project"]);
+    res.end("{}");
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  t.after(() => server.close());
+  const info = { url: "http://127.0.0.1:" + server.address().port + "/?key=test" };
+  put(path.join(f.env.RYUGI_SERVER_HOME, "server-info"), info);
+  put(path.join(f.root, ".state/server-info"), info);
+  f.json("subscribe", "--artifact", "artboard/flush");
+  await new Promise((r) => setTimeout(r, 2600));
+  assert.equal(hits.length, 0);
+  f.threads[0].status = "completed";
+  put(path.join(f.dir, "threads"), f.threads);
+  await until(() => hits.length === 1);
+  await new Promise((r) => setTimeout(r, 3000));
+  assert.deepEqual(hits, [encodeURIComponent(f.project)]);
+});
