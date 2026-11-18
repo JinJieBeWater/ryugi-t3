@@ -17,6 +17,32 @@ const keys = {
   pi: "pi",
   grok: "Grok",
 };
+// While T3 owns an artifact, Ryugi's per-session watchers must not wake their host too.
+// Session ids are unreliable under T3 (Codex binds by app-server), so strip every host session.
+function stripNative(project, owned, ours) {
+  const state = path.join(project, ".ryugi/artifacts/.state");
+  let dirs = [];
+  try {
+    dirs = fs.readdirSync(state).filter((d) => d.endsWith("-comment-watch"));
+  } catch {}
+  for (const dir of dirs) {
+    let names = [];
+    try {
+      names = fs.readdirSync(path.join(state, dir)).filter((n) => n.endsWith(".json"));
+    } catch {}
+    for (const name of names) {
+      const file = path.join(state, dir, name);
+      if (file === ours) continue;
+      try {
+        const data = JSON.parse(fs.readFileSync(file, "utf8"));
+        if (!Array.isArray(data?.artifacts) || !data.artifacts.some((a) => owned.has(a))) continue;
+        atomic(file, { ...data, artifacts: data.artifacts.filter((a) => !owned.has(a)) });
+      } catch {
+        // A partial write by Ryugi is retried on the next pass.
+      }
+    }
+  }
+}
 function syncProjectHeartbeat(project, subscriptions, now = Date.now()) {
   const subFile = subscriptionFile(project, "codex", watchId);
   const alive = aliveFile(project, "codex", watchId);
@@ -41,6 +67,7 @@ function syncProjectHeartbeat(project, subscriptions, now = Date.now()) {
     } catch {}
     if (!same) atomic(subFile, { artifacts });
     beat(project, "codex", watchId, now);
+    stripNative(project, new Set(artifacts), subFile);
     return true;
   } catch {
     return false;

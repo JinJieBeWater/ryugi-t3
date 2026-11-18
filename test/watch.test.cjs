@@ -248,3 +248,22 @@ test("worker publishes viewer listening heartbeat while subscribed and clears it
   f.json("unsubscribe", "--artifact", a);
   await until(() => !fs.existsSync(sub) && !fs.existsSync(alive));
 });
+test("subscribe strips the artifact from every native host subscription and the worker strips it again after Ryugi re-registers", async (t) => {
+  const f = fixture(t),
+    a = "artboard/native",
+    other = "document/keep",
+    state = path.join(f.root, ".state");
+  const native = (host, session) => path.join(state, host + "-comment-watch", session + ".json");
+  const files = [native("claude", "c1"), native("pi", "p1"), native("codex", "x1")];
+  for (const file of files) put(file, { artifacts: [a, other], updatedAt: "t" });
+  const ours = native("codex", "ryugi-t3-watch");
+  f.json("subscribe", "--artifact", a);
+  for (const file of files) assert.deepEqual(JSON.parse(fs.readFileSync(file)).artifacts, [other]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ours)).artifacts, [a]);
+  put(files[1], { artifacts: [other, a] });
+  await until(() => !JSON.parse(fs.readFileSync(files[1])).artifacts.includes(a));
+  f.json("unsubscribe", "--artifact", a);
+  put(files[2], { artifacts: [a] });
+  await new Promise((r) => setTimeout(r, 3000));
+  assert.deepEqual(JSON.parse(fs.readFileSync(files[2])).artifacts, [a]);
+});
