@@ -357,3 +357,16 @@ test("a store written by the hook era keeps working and drops its session bindin
     ["artboard/legacy"],
   );
 });
+test("subscribe on an artifact type without feedback says no subscription is needed", (t) => {
+  const f = fixture(t),
+    { spawnSync } = require("node:child_process"),
+    { cli } = require("./fixtures.cjs");
+  const r = spawnSync(cli, ["subscribe", "--artifact", "verify/report"], {
+    cwd: f.project,
+    env: f.env,
+    encoding: "utf8",
+  });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /document、artboard、whiteboard、slides/);
+  assert.match(r.stderr, /verify\/report 不需要订阅/);
+});

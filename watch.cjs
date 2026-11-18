@@ -118,7 +118,13 @@ function ensureJob() {
 function identity(opts) {
   const project = projectRoot(opts.project || opts.cwd || process.cwd()),
     artifact = opts.artifact;
-  if (!artifactPattern.test(artifact)) throw new Error("Expected --artifact <type>/<id>");
+  // Same types as Ryugi's own comment subscriptions; other artifacts send no feedback.
+  if (!artifactPattern.test(artifact))
+    throw new Error(
+      /^[a-z]+\/[a-z0-9][a-z0-9-]*$/.test(artifact || "")
+        ? `Ryugi 只回传 document、artboard、whiteboard、slides 的反馈，${artifact} 不需要订阅`
+        : "Expected --artifact <type>/<id>",
+    );
   return { project, artifact };
 }
 const find = (db, key) =>
