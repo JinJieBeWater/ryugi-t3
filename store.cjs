@@ -22,9 +22,11 @@ function atomic(file, value) {
 }
 function load() {
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
+    // Older stores also carry hook session bindings; dropping them here clears them on the next save.
+    const { subscriptions = [] } = JSON.parse(fs.readFileSync(file, "utf8"));
+    return { subscriptions };
   } catch (e) {
-    if (e.code === "ENOENT") return { subscriptions: [], sessions: {} };
+    if (e.code === "ENOENT") return { subscriptions: [] };
     throw e;
   }
 }

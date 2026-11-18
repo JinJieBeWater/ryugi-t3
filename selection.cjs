@@ -165,18 +165,17 @@ function whiteboardSelections(session, root, budget) {
   return sections;
 }
 
-function selectionContext(project, session, host, prompt = "", sessionId = "", thread) {
+function selectionContext(project, session, host, prompt = "", owner) {
   const root = path.join(project, ".ryugi/artifacts");
   const state = path.join(root, ".state");
   if (!fs.existsSync(path.join(state, "server-info"))) return "";
   const db = load();
   const { base } = transport();
-  const owner = thread || db.sessions[JSON.stringify([base, sessionId])];
   const related = new Set(checkouts(project));
   const byProject = new Map();
   for (const sub of db.subscriptions) {
     if (sub.project === project || sub.deadline <= Date.now() || sub.base !== base) continue;
-    if (owner ? sub.thread !== owner : sessionId || !related.has(sub.project)) continue;
+    if (owner ? sub.thread !== owner : !related.has(sub.project)) continue;
     if (!byProject.has(sub.project)) byProject.set(sub.project, new Set());
     byProject.get(sub.project).add(sub.artifact);
   }
@@ -186,7 +185,7 @@ function selectionContext(project, session, host, prompt = "", sessionId = "", t
   // Unread counts are per host review key; without one every comment would look unread.
   const reminders = [
     ...(host ? [commentReminders(project, root, host), ...elsewhere] : []),
-    autoPublishContext(project, process.env, sessionId),
+    autoPublishContext(project, process.env, ""),
   ]
     .filter(Boolean)
     .join("\n\n");

@@ -331,3 +331,16 @@ test("worker flushes the project once when its subscribed thread stops running",
   await new Promise((r) => setTimeout(r, 3000));
   assert.deepEqual(hits, [encodeURIComponent(f.project)]);
 });
+test("a store written by the hook era keeps working and drops its session bindings", (t) => {
+  const f = fixture(t),
+    store = path.join(f.state, "subscriptions.json");
+  put(store, { subscriptions: [], sessions: { '["base","s"]': "th" } });
+  assert.deepEqual(f.json("list"), []);
+  f.json("subscribe", "--artifact", "artboard/legacy");
+  const saved = JSON.parse(fs.readFileSync(store, "utf8"));
+  assert.equal(saved.sessions, undefined);
+  assert.deepEqual(
+    saved.subscriptions.map((s) => s.artifact),
+    ["artboard/legacy"],
+  );
+});

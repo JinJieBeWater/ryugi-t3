@@ -1,8 +1,4 @@
 #!/bin/sh
-case "$1:$2" in
-  hook:claude) [ -n "${T3CODE_THREAD_ID:-}" ] || exit 0 ;;
-  hook:codex) [ -n "${T3CODE_DESKTOP_HOST_SCOPE:-}${T3CODE_CLI_PATH:-}" ] || exit 0 ;;
-esac
 entry=$(/usr/bin/readlink -f "$0") || exit 1
 for node in "$(command -v node)" /opt/homebrew/bin/node "$HOME/.local/share/mise/shims/node" "$HOME/.vite-plus/bin/node"; do
   [ -x "$node" ] && exec "$node" "${entry%/*}/cli.cjs" "$@"

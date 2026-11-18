@@ -4,13 +4,13 @@ const path = require("node:path");
 const { spawnSync, execFileSync } = require("node:child_process");
 const { setTimeout: sleep } = require("node:timers/promises");
 const { randomUUID } = require("node:crypto");
-const { artifactPattern } = require("./parser.cjs");
 const { projectRoot, aliveFile, beat, subscriptionFile, app } = require("./upstream.cjs");
 const { unreadCount } = app("comment-watch");
 const { postToServer } = app("agent-event");
 const { atomic, stateRoot, locked, load, label } = require("./store.cjs");
 const { scan, emptyBaseline } = require("./events.cjs");
 const watchId = "ryugi-t3-watch";
+const artifactPattern = /^(?:document|artboard|whiteboard|slides)\/[a-z0-9][a-z0-9-]*$/;
 const keys = {
   antigravity: "Antigravity",
   codex: "Codex",

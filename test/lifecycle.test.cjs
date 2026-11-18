@@ -2,10 +2,8 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const http = require("node:http");
-const { promisify } = require("node:util");
-const { execFile, execFileSync } = require("node:child_process");
-const { fixture, put, until, cli } = require("./fixtures.cjs");
+const { execFileSync } = require("node:child_process");
+const { fixture, put } = require("./fixtures.cjs");
 const { app } = require("../upstream.cjs");
 const { reviewStateKey, humanTokens } = app("comment-threads");
 test("prompt context preserves upstream selections, inspector and named nodes, with per-host worktree reminders", (t) => {
@@ -79,30 +77,6 @@ test("prompt context preserves upstream selections, inspector and named nodes, w
   ])
     assert.ok(text.includes(part), part);
   assert.doesNotMatch(ctx("Codex"), /Unread comment evidence/);
-});
-test("session-start registers asynchronously and turn-end POSTs cloud flush to project server", async (t) => {
-  const f = fixture(t),
-    hits = [];
-  const server = http.createServer((req, res) => {
-    hits.push([req.method, req.url, req.headers]);
-    res.end("{}");
-  });
-  await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  t.after(() => server.close());
-  const info = { url: "http://127.0.0.1:" + server.address().port + "/?key=test" };
-  put(path.join(f.env.RYUGI_SERVER_HOME, "server-info"), info);
-  put(path.join(f.root, ".state/server-info"), info);
-  f.run(["session-start", "--cwd", f.project]);
-  await until(() => hits.some((x) => x[1] === "/api/hub/projects?key=test"));
-  await promisify(execFile)(cli, ["turn-end", "--cwd", f.project], { env: f.env });
-  assert.ok(
-    hits.some(
-      ([method, url, headers]) =>
-        method === "POST" &&
-        url === "/api/cloud/flush?key=test" &&
-        headers["x-ryugi-project"] === encodeURIComponent(f.project),
-    ),
-  );
 });
 test("reminds the owning thread about an explicit project-dir outside its git worktree", (t) => {
   const f = fixture(t);
