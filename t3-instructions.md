@@ -1,1 +1,0 @@
-- 在 T3 线程里打开 Ryugi 产物（`ryugi.cjs start --artifact …`）后，紧接着运行 `ryugi-t3-watch subscribe --artifact <type>/<id> --project <与 --project-dir 相同的目录>`，把提交和评论接回本线程；每次重新 start 都要再运行一次。用户说「这里」「这段」「选中的」却没给出位置时，先运行 `ryugi-t3-watch selection-context --cwd <同一目录>`；没有输出表示查看器里没有选区。

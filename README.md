@@ -2,13 +2,12 @@
 
 T3 线程里的 agent 运行 `ryugi start --artifact artboard/layout` 后，接着运行 `ryugi-t3-watch subscribe`，之后的提交、撤回和人类评论会送回这个线程。线程 ID 取自 `--thread` 或 T3 注入的 `T3CODE_THREAD_ID`（Claude、Codex、Pi、Antigravity 都有）；都没有时报错并提示用 `orchestrator_capabilities` 的 `parentThreadId` 重试。不需要任何宿主 hook 或扩展。订阅期间，项目里所有 Ryugi 原生订阅都会去掉这个产物，反馈只由 T3 投递一次；线程结束一轮时立即触发云端发布。换宿主时跟随线程当前的评论游标。同一产物在另一线程重新订阅即转移归属。
 
-给 agent 的说明在 [t3-instructions.md](t3-instructions.md)，只给 T3 线程，不进各宿主的全局说明：
+agent 不需要任何说明，订阅在 agent 运行 Ryugi 的 `start` 时自动完成，规则在 [autosub.cjs](autosub.cjs)：只认 `ryugi.cjs`（或 `ryugi-artifacts.cjs`）的 `start`，按命令行里的 `--artifact` 和 `--project-dir` 订阅，再告诉 agent 选区要用 `selection-context` 读。`--help`、不回传反馈的产物类型和 T3 外的 shell 都跳过。订阅失败（自检不通过、Codex 沙盒写不了状态目录）时告诉 agent 原因和手动 `subscribe` 的命令，start 本身照常成功。两条入口都只配在 `~/.t3/userdata/settings.json` 的 T3 provider 里：
 
-- Claude、Pi：`~/.t3/userdata/settings.json` 里 `providerInstances.<id>.config.launchArgs` 分别用 `--append-system-prompt-file` 和 `--append-system-prompt` 指向这个文件。
-- Codex：同一位置用 `-c 'developer_instructions="…"'` 内联全文，改了这个文件要同步改那里。
-- Antigravity：写在 `~/my/pi-stuff/config/antigravity/agents/lean.md` 正文；T3 的包装脚本给每个会话加 `--agent lean`。
+- Codex、Pi、Antigravity：`providerInstances.<id>.environment` 设 `NODE_OPTIONS=--require <本目录>/preload.cjs`，线程 shell 里每个 node 进程先加载 [preload.cjs](preload.cjs)。它在 start 成功退出后、或仍在运行满 3 秒时订阅，提示写在 stderr，Ryugi 的 stdout 不动。
+- Claude：Claude Code 会从 Bash 命令的环境里去掉 `NODE_OPTIONS`，所以改用启动参数 `--settings <本目录>/claude-settings.json` 挂一个 Bash 的 PostToolUse hook，[claude-hook.cjs](claude-hook.cjs) 从命令行里拆出参数（跟随同一行里的 `cd`，只展开 `$PWD`），提示作为 hook 上下文交给 agent。项目目录写成别的变量时不猜，提示 agent 手动订阅。
 
-改 launchArgs 后，已启动的 Codex app-server 和已有会话要重启才会读到。
+改 environment 或启动参数后，已启动的 Codex app-server 和已有会话要重启才会读到。某个工具自己重设 `NODE_OPTIONS` 时，那次 start 不会自动订阅，可以手动运行 `subscribe`。
 
 ```sh
 ryugi-t3-watch subscribe --project "$PWD" --artifact artboard/layout [--thread THREAD]
