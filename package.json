@@ -1,0 +1,14 @@
+{
+  "name": "ryugi-t3-watch",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test 'test/*.test.cjs'"
+  },
+  "dependencies": {
+    "mvdan-sh": "^0.10.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
