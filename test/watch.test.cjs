@@ -280,8 +280,9 @@ test("without a thread id subscribe binds the only running Antigravity thread of
     worktreePath,
     archived: false,
   });
+  // The artifact project may sit below the thread's checkout, as in a scratch thread.
   f.threads.push(
-    ag("ag", f.project),
+    ag("ag", f.dir),
     ag("ag-elsewhere", elsewhere),
     ag("ag-idle", f.project, "completed"),
   );

@@ -138,7 +138,10 @@ function antigravityThread(route, project) {
           r.worktreePath === undefined
             ? show({ ...route, thread: r.threadId }, 0).thread.worktreePath
             : r.worktreePath;
-        return !where || projectRoot(where) === project;
+        if (!where) return true;
+        // The artifact project may be a subdirectory of the thread's checkout.
+        const rel = path.relative(projectRoot(where), project);
+        return rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel);
       } catch {
         return false;
       }
