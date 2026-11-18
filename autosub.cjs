@@ -31,8 +31,8 @@ function subscribe({ artifact, project }, cwd) {
   );
   if (r.status === 0)
     return (
-      `ryugi-t3-watch: ${artifact} 的提交和评论会送回这个 T3 线程，不必再订阅。` +
-      `用户说「这里」「这段」「选中的」却没给出位置时，运行 ryugi-t3-watch selection-context --cwd ${JSON.stringify(project)}；没有输出表示查看器里没有选区。`
+      `ryugi-t3-watch: 已订阅 ${artifact}，提交和评论会自动送回本线程。` +
+      `用户指代产物里的某处却没说是哪（「这里」「这个按钮」）时，先运行 ryugi-t3-watch selection-context --cwd ${JSON.stringify(project)} 读查看器里的选区；输出为空再问用户指的是哪里。`
     );
   // A sandboxed shell (Codex workspace-write) cannot write the bridge state or reach launchd.
   return (
