@@ -16,8 +16,8 @@ ryugi-t3-watch arm --project "$PWD" --artifact artboard/settings --round layout
 - `status`：查看当前绑定、`jobActive` 与 `lastError`，并在投递回执丢失时核对线程消息以确认是否已送达。
 - `cancel`：取消当前 `waiting` 绑定并移除后台 job。
 - `list`：列出已追踪的绑定（`--active` 仅看未完成项）。
-- `prune`：清理已完成（`delivered` / `cancelled` / `expired`）绑定和孤立状态目录（`--all` 一并清理已失活的 `waiting` 绑定）。
+- `prune`：清理已完成（`delivered` / `cancelled` / `expired`）绑定和孤立状态目录（`--all` 一并清理已失活的 `waiting` 绑定）。`arm` 也会自动清理超过 7 天的已完成历史状态。
 
-后台通过 macOS 临时 `launchd` 任务读取公共轮次查询（每页最多 100 条）。提交前后复读本轮，发给登记的 T3 实例与 thread，受理后退出。投递回执不明时保留 `uncertain`，避免自动重发。
+后台通过 macOS 临时 `launchd` 任务按自适应间隔（2s → 5s → 10s）读取公共轮次查询（每页最多 100 条）。提交前后复读本轮，发给登记的 T3 实例与 thread，受理后退出。投递回执不明时保留 `uncertain`，避免自动重发，并在后续 `status` / `arm` 时核对线程最近消息。
 
 源码链接安装到 `~/.local/bin/ryugi-t3-watch`。使用 Python 3 标准库、`launchctl`、`t3` 和 `ryugi`。

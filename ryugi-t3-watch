@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -15,13 +16,25 @@ import time
 import uuid
 
 LAUNCHCTL = "/bin/launchctl"
-POLL_SECONDS = 2
 RYUGI_PAGE_LIMIT = 100
+PRUNE_AFTER_SECONDS = 7 * 86400
 FINISHED_STATES = frozenset(("delivered", "cancelled", "expired"))
 
 
 def now_iso():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def poll_interval(started_at, deadline):
+    elapsed = max(0.0, time.time() - started_at)
+    if elapsed < 60:
+        step = 2.0
+    elif elapsed < 600:
+        step = 5.0
+    else:
+        step = 10.0
+    remaining = max(0.1, deadline - time.time())
+    return min(step, remaining)
 
 
 def run_json(argv):
@@ -53,13 +66,24 @@ def t3_binary():
     return executable(os.getenv("T3CODE_CLI_PATH") or "t3")
 
 
+def load_json_dict(file):
+    if not file.exists():
+        return {}
+    try:
+        data = json.loads(file.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 @contextmanager
-def binding(directory):
+def binding(directory, blocking=True):
     """Keep the lock inode stable; replace only the JSON record."""
     with (directory / "lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        flags = fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB)
+        fcntl.flock(lock, flags)
         file = directory / "binding.json"
-        data = json.loads(file.read_text()) if file.exists() else {}
+        data = load_json_dict(file)
         before = data.copy()
         yield data
         if data != before:
@@ -160,9 +184,13 @@ def submit_job(directory, record):
 
 def notification(record):
     target = json.dumps({k: record[k] for k in ("project", "artifact", "round")}, ensure_ascii=False)
+    cmd = (
+        f"ryugi comment list --project-dir {shlex.quote(record['project'])} "
+        f"--artifact {shlex.quote(record['artifact'])} --sections groups,rounds --detail --json"
+    )
     return (
-        f"[ryugi:{record['job']}] 画板轮次已提交。请用裸 ryugi 读取以下目标的最新选择；"
-        f"仍为 submitted 时继续原任务，若已撤回则等待新决定。目标 {target}"
+        f"[ryugi:{record['job']}] 画板轮次已提交。请执行 `{cmd}` 复读最新选择；"
+        f"仍为 submitted 时继续原任务，若已撤回为 open 则等待新决定。目标 {target}"
     )
 
 
@@ -183,7 +211,7 @@ def clear_error(directory, job):
 
 def tick(directory, job):
     with binding(directory) as record:
-        if record.get("job") != job or record.get("state") != "waiting":
+        if record.get("job") != job or record["state"] != "waiting":
             return False
         if time.time() >= record["deadline"]:
             record["state"] = "expired"
@@ -215,7 +243,7 @@ def tick(directory, job):
         return True
 
     with binding(directory) as record:
-        if record.get("job") != job or record.get("state") != "waiting":
+        if record.get("job") != job or record["state"] != "waiting":
             return False
         if time.time() >= record["deadline"]:
             record["state"] = "expired"
@@ -257,15 +285,18 @@ def tick(directory, job):
 
 
 def worker(directory, job):
+    started_at = time.time()
+    deadline = started_at + 86400
     try:
         with binding(directory) as record:
             if record.get("job") != job:
                 return
+            deadline = record.get("deadline", deadline)
             os.environ["PATH"] = record["path"]
             if record.get("serverHome"):
                 os.environ["RYUGI_SERVER_HOME"] = record["serverHome"]
         while tick(directory, job):
-            time.sleep(POLL_SECONDS)
+            time.sleep(poll_interval(started_at, deadline))
     finally:
         sys.stdout.flush()
         sys.stderr.flush()
@@ -289,7 +320,25 @@ def public(record):
     return {k: record[k] for k in keys if record.get(k) is not None}
 
 
-def resolve_thread(args, t3, base, required=True):
+def list_project_threads(t3, base, project=None):
+    cwd = Path.cwd().resolve()
+    candidates = [None]
+    if project is not None and project.resolve() != cwd:
+        candidates.append(str(project.resolve()))
+    for target in candidates:
+        argv = [t3, "thread", "list", "--base-dir", base, "--json"]
+        if target is not None:
+            argv.extend(["--project", target])
+        try:
+            items = run_json(argv)
+            if isinstance(items, list):
+                return items
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+    return None
+
+
+def resolve_thread(args, t3, base, project=None, required=True):
     current = os.environ.get("T3CODE_THREAD_ID")
     if current and args.thread and current != args.thread:
         raise ValueError("--thread differs from the current T3 thread")
@@ -297,12 +346,27 @@ def resolve_thread(args, t3, base, required=True):
         return current or args.thread
     if not required:
         return None
-    threads = run_json([t3, "thread", "list", "--base-dir", base, "--json"])
+    threads = list_project_threads(t3, base, project)
+    if threads is None:
+        raise ValueError("Supply the current T3 context's thread ID via --thread")
     running = [item for item in threads if item.get("status") == "running"]
     if os.environ.get("ANTIGRAVITY_AGENT"):
         antigravity = [item for item in running if item.get("providerInstanceId") == "antigravity"]
         if antigravity:
             running = antigravity
+    if len(running) > 1 and len(running) <= 5:
+        cwd_str = str(Path.cwd().resolve())
+        matched = []
+        for item in running:
+            try:
+                detail = run_json([t3, "thread", "show", "--base-dir", base, "--messages", "0", "--json", item["threadId"]])
+                wp = detail.get("thread", {}).get("worktreePath")
+                if wp and str(Path(wp).resolve()) == cwd_str:
+                    matched.append(item)
+            except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+                pass
+        if len(matched) == 1:
+            return matched[0]["threadId"]
     if len(running) == 1:
         return running[0]["threadId"]
     raise ValueError(
@@ -334,7 +398,7 @@ def reconcile_record(record, jobs_cache=None):
         record["updatedAt"] = now_iso()
     if record["state"] == "uncertain":
         try:
-            recent = show(record, count=25)["messages"]
+            recent = show(record, count=50)["messages"]
         except (OSError, ValueError, KeyError, subprocess.SubprocessError):
             recent = []
         expected = notification(record)
@@ -357,12 +421,41 @@ def require_owner(record, thread, base):
         raise ValueError("Another T3 thread or instance owns this round")
 
 
+def sweep_stale(keep_dir=None, max_age=PRUNE_AFTER_SECONDS):
+    root = state_root()
+    if not root.is_dir():
+        return
+    cutoff = time.time() - max_age
+    for entry in root.iterdir():
+        if not entry.is_dir() or (keep_dir is not None and entry == keep_dir):
+            continue
+        file = entry / "binding.json"
+        if not file.is_file():
+            try:
+                if entry.stat().st_mtime < cutoff:
+                    shutil.rmtree(entry, ignore_errors=True)
+            except OSError:
+                pass
+            continue
+        remove_entry = False
+        try:
+            with binding(entry, blocking=False) as record:
+                if not record:
+                    remove_entry = file.stat().st_mtime < cutoff
+                elif record.get("state") in FINISHED_STATES and file.stat().st_mtime < cutoff:
+                    remove_entry = True
+        except OSError:
+            continue
+        if remove_entry:
+            shutil.rmtree(entry, ignore_errors=True)
+
+
 def cmd_cancel(args):
-    _, directory = target_directory(args)
+    project, directory = target_directory(args)
     if not (directory / "binding.json").is_file():
         raise ValueError("No binding for this round")
     base = resolve_base(args.base_dir)
-    thread = resolve_thread(args, t3_binary(), base)
+    thread = resolve_thread(args, t3_binary(), base, project=project)
     with binding(directory) as record:
         require_owner(record, thread, base)
         if record["state"] == "waiting":
@@ -373,11 +466,11 @@ def cmd_cancel(args):
 
 
 def cmd_status(args):
-    _, directory = target_directory(args)
+    project, directory = target_directory(args)
     if not (directory / "binding.json").is_file():
         raise ValueError("No binding for this round")
     base = resolve_base(args.base_dir)
-    thread = resolve_thread(args, t3_binary(), base, required=False)
+    thread = resolve_thread(args, t3_binary(), base, project=project, required=False)
     with binding(directory) as record:
         if thread:
             require_owner(record, thread, base)
@@ -393,22 +486,26 @@ def cmd_arm(args):
     project, directory = target_directory(args)
     base = resolve_base(args.base_dir)
     t3 = t3_binary()
-    thread = resolve_thread(args, t3, base)
+    thread = resolve_thread(args, t3, base, project=project)
     existed = (directory / "binding.json").is_file()
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
         with binding(directory) as record:
             require_owner(record, thread, base)
             if record:
+                job_alive = reconcile_record(record)
                 if record["state"] in ("sending", "uncertain"):
                     raise ValueError("Delivery may already have been accepted; check status")
-                if record["state"] == "waiting" and is_job_alive(record["job"]):
+                if record["state"] == "waiting" and job_alive:
                     return public(record)
                 if record["state"] == "delivered":
                     if not args.again:
                         return public(record)
-                    if round_state(record) != "open":
-                        raise ValueError("--again requires a reopened round")
+                    current_round = round_state(record)
+                    if current_round != "open":
+                        raise ValueError(
+                            f"--again requires a reopened round (current: {current_round or 'missing'})"
+                        )
             stamp = now_iso()
             config = dict(
                 project=str(project),
@@ -431,11 +528,13 @@ def cmd_arm(args):
             submit_job(directory, config)
             record.clear()
             record.update(config)
-            return public(record)
+            result = public(record)
     except Exception:
         if not existed and not (directory / "binding.json").exists():
             shutil.rmtree(directory, ignore_errors=True)
         raise
+    sweep_stale(keep_dir=directory)
+    return result
 
 
 def cmd_list(args):
@@ -450,7 +549,7 @@ def cmd_list(args):
         if not entry.is_dir() or not file.is_file():
             continue
         with binding(entry) as record:
-            if not record:
+            if not record or "state" not in record:
                 continue
             if not args.all_bases and record.get("base") != base:
                 continue
@@ -483,7 +582,7 @@ def cmd_prune(args):
         remove_entry = False
         summary = None
         with binding(entry) as record:
-            if not record:
+            if not record or "state" not in record:
                 remove_entry = True
                 summary = {"key": entry.name, "reason": "empty"}
             elif not args.all_bases and record.get("base") != base:

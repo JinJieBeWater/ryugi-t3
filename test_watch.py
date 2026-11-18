@@ -32,18 +32,25 @@ if Path(__file__).name == "ryugi":
             (root/"rounds").write_text('["open"]')
         print(json.dumps(dict(outcome="success",data=dict(items=[dict(id="layout",state=q[0])]),page=dict(nextCursor=None))))
 elif args[:2]==["thread","list"]:
+    if (root/"require-project-flag").exists() and "--project" not in args:
+        sys.stderr.write("No T3 Code project matches '.'\\n")
+        sys.exit(1)
     items=json.loads((root/"threads").read_text()) if (root/"threads").exists() else []
     print(json.dumps(items))
 elif args[:2]==["thread","show"]:
     tid=args[-1]
     archived=(root/"archived").exists()
+    worktrees=json.loads((root/"worktrees").read_text()) if (root/"worktrees").exists() else {}
     msgs=[]
     if (root/"echo-deliveries").exists() and (root/"deliveries").exists():
         for line in (root/"deliveries").read_text().splitlines():
             target, text = line.split(" ", 1)
             if target == tid:
                 msgs.append(dict(role="user", text=text))
-    print(json.dumps(dict(thread=dict(threadId=tid,archived=archived),messages=msgs)))
+    thread_obj=dict(threadId=tid,archived=archived)
+    if tid in worktrees:
+        thread_obj["worktreePath"]=worktrees[tid]
+    print(json.dumps(dict(thread=thread_obj,messages=msgs)))
 elif args[:2]==["thread","send"]:
     tid,msg=args[-2:]
     with (root/"deliveries").open("a") as f: f.write(tid+" "+msg.replace(chr(10)," ") + chr(10))
@@ -76,7 +83,7 @@ class WatchTest(unittest.TestCase):
         self.assertTrue(CLI.is_file(), "the bridge executable is missing")
         self.addCleanup(lambda: self.call("cancel", check=False))
 
-    def call(self, op, *extra, owner="thread:mcp:A", check=True, env_override=None):
+    def call(self, op, *extra, owner="thread:mcp:A", check=True, env_override=None, cwd=None):
         env = dict(self.env)
         if owner is None:
             env.pop("T3CODE_THREAD_ID", None)
@@ -97,6 +104,7 @@ class WatchTest(unittest.TestCase):
                 "layout",
                 *extra,
             ],
+            cwd=cwd,
             env=env,
             text=True,
             capture_output=True,
@@ -179,7 +187,7 @@ class WatchTest(unittest.TestCase):
             self.assertEqual(data["state"], "waiting")
             self.assertIn("temporarily unavailable", data["lastError"])
 
-    def test_lost_receipt_and_status_reconciliation(self):
+    def test_lost_receipt_reconciles_on_arm_and_status(self):
         (self.p / "lose-ack").touch()
         (self.p / "rounds").write_text('["submitted"]')
         self.call("arm")
@@ -187,9 +195,11 @@ class WatchTest(unittest.TestCase):
         self.call("arm", check=False)
         self.assertEqual(len((self.p / "deliveries").read_text().splitlines()), 1)
         (self.p / "echo-deliveries").touch()
-        reconciled = json.loads(self.call("status", owner=None).stdout)
+        # Re-arming once delivered on T3 reconciles directly to delivered.
+        reconciled = json.loads(self.call("arm").stdout)
         self.assertEqual(reconciled["state"], "delivered")
         self.assertIn("deliveredAt", reconciled)
+        self.assertEqual(json.loads(self.call("status", owner=None).stdout)["state"], "delivered")
 
     def test_list_prune_and_failed_arm_cleanup(self):
         (self.p / "archived").touch()
@@ -198,8 +208,16 @@ class WatchTest(unittest.TestCase):
         watch_dir = self.p / "state/ryugi-t3-watch"
         self.assertFalse(watch_dir.exists() and any(watch_dir.iterdir()))
 
+        # Old finished directory (>7 days) is auto-swept on next arm.
+        stale = watch_dir / "old-finished"
+        stale.mkdir(parents=True)
+        (stale / "binding.json").write_text(json.dumps({"state": "delivered"}))
+        old_ts = time.time() - 8 * 86400
+        os.utime(stale / "binding.json", (old_ts, old_ts))
+
         (self.p / "archived").unlink()
         self.call("arm")
+        self.assertFalse(stale.exists())
         listed_active = json.loads(self.call_global("list", "--active").stdout)
         self.assertEqual(len(listed_active["items"]), 1)
         self.assertEqual(listed_active["items"][0]["state"], "waiting")
@@ -218,19 +236,33 @@ class WatchTest(unittest.TestCase):
     def test_thread_auto_resolution_without_env(self):
         (self.p / "threads").write_text(json.dumps([
             {"threadId": "t-idle", "status": "completed", "providerInstanceId": "antigravity"},
-            {"threadId": "t-ag", "status": "running", "providerInstanceId": "antigravity"},
+            {"threadId": "t-ag-1", "status": "running", "providerInstanceId": "antigravity"},
+            {"threadId": "t-ag-2", "status": "running", "providerInstanceId": "antigravity"},
             {"threadId": "t-codex", "status": "running", "providerInstanceId": "codex"},
         ]))
-        # Ambiguous (2 running threads) fails without ANTIGRAVITY_AGENT.
-        ambig = self.call("arm", owner=None, check=False)
-        self.assertNotEqual(ambig.returncode, 0)
-        # ANTIGRAVITY_AGENT narrows to the single running antigravity thread.
-        ok = self.call("arm", owner=None, env_override={"ANTIGRAVITY_AGENT": "1"})
-        self.assertEqual(json.loads(ok.stdout)["thread"], "t-ag")
-        self.call("cancel", "--thread", "t-ag", owner=None)
+        wt1 = self.p / "wt1"
+        wt2 = self.p / "wt2"
+        wt1.mkdir()
+        wt2.mkdir()
+        (self.p / "worktrees").write_text(json.dumps({"t-ag-1": str(wt1), "t-ag-2": str(wt2)}))
+        (self.p / "require-project-flag").touch()
 
-    def test_expired_and_archived_transitions(self):
+        # Ambiguous at root (multiple running antigravity threads, neither matches cwd).
+        ambig = self.call("arm", owner=None, env_override={"ANTIGRAVITY_AGENT": "1"}, check=False)
+        self.assertNotEqual(ambig.returncode, 0)
+
+        # Inside wt1, worktreePath tie-breaking + --project fallback resolves t-ag-1 uniquely.
+        ok = self.call("arm", owner=None, env_override={"ANTIGRAVITY_AGENT": "1"}, cwd=str(wt1))
+        self.assertEqual(json.loads(ok.stdout)["thread"], "t-ag-1")
+        self.call("cancel", "--thread", "t-ag-1", owner=None)
+
+    def test_expired_archived_and_poll_interval(self):
         mod = runpy.run_path(str(CLI))
+        self.assertEqual(mod["poll_interval"](time.time() - 5, time.time() + 100), 2.0)
+        self.assertEqual(mod["poll_interval"](time.time() - 120, time.time() + 100), 5.0)
+        self.assertEqual(mod["poll_interval"](time.time() - 700, time.time() + 100), 10.0)
+        self.assertLessEqual(mod["poll_interval"](time.time() - 700, time.time() + 1.5), 1.6)
+
         expired_dir = self.p / "expired"
         expired_dir.mkdir()
         (expired_dir / "binding.json").write_text(json.dumps(dict(
