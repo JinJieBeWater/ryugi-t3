@@ -2,7 +2,7 @@
 // selection formatters aligned with hooks/selection-context.cjs (Ryugi 1.81).
 const fs = require("node:fs");
 const path = require("node:path");
-const { plugin, checkouts } = require("./upstream.cjs");
+const { plugin, checkouts, projectRoot } = require("./upstream.cjs");
 const { load } = require("./store.cjs");
 const { transport } = require("./watch.cjs");
 const { autoPublishContext, commentReminders } = require(
@@ -165,7 +165,14 @@ function whiteboardSelections(session, root, budget) {
   return sections;
 }
 
-function selectionContext(project, session, host, prompt = "", owner) {
+function selectionContext(opts) {
+  let session = opts.cwd || process.cwd();
+  try {
+    session = fs.realpathSync(session);
+  } catch {}
+  const project = projectRoot(session);
+  const { host, prompt = "" } = opts;
+  const owner = Object.hasOwn(opts, "thread") ? opts.thread : process.env.T3CODE_THREAD_ID;
   const root = path.join(project, ".ryugi/artifacts");
   const state = path.join(root, ".state");
   if (!fs.existsSync(path.join(state, "server-info"))) return "";

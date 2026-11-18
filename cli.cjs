@@ -11,7 +11,7 @@ async function main() {
   );
   const { values } = parseArgs({ args, options });
   if (op === "selection-context") {
-    const output = require("./lifecycle.cjs").selectionContext(values);
+    const output = require("./selection.cjs").selectionContext(values);
     if (output) console.log(output);
     return;
   }

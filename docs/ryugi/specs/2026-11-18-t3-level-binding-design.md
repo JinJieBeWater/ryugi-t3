@@ -77,7 +77,7 @@
    - **顺带关掉重复窗口**：agent 重新运行 `start` 后忘了 `subscribe`，Ryugi 会把原生订阅写回去，worker 下一轮（1–2.5 秒）就会再清掉。
 
    这项改动替代 `hooks.cjs` 里 `observeCommand` 只处理 Claude 的删除逻辑。**用户的决定**：只在 T3 里使用，所以 T3 订阅期间这些产物只由 T3 投递。
-2. **`subscribe` 精简输出，1 行。** 改为只打印 `{ project, artifact, thread, deadline }`，不再打印整条记录。整条记录里有基线，评论多时达到 KB 级，会进入 agent 的上下文。**这是我的决定。**
+2. **`subscribe` 精简输出，1 行。** 改为只打印 `{ project, artifact, thread, createdAt, deadline }`，不再打印整条记录（`createdAt` 留给续订测试核对基线没有重建）。整条记录里有基线，评论多时达到 KB 级，会进入 agent 的上下文。**这是我的决定。**
 3. **缺线程时自动找 Antigravity 线程，约 15 行。** `--thread` 和 `T3CODE_THREAD_ID` 都没有时：
    - 运行 `t3 thread list --project <project>`，取出 `providerInstanceId === "antigravity"`、`status === "running"`、并且未归档的线程。
    - 对每个候选运行 `show`：有 `worktreePath` 的，要求它的 `projectRoot` 等于本项目；没有 `worktreePath` 的照收。
@@ -147,7 +147,7 @@
 - 退订或订阅过期之后，不再清理。
 - 没有线程时：恰好有一个属于本项目的 Antigravity running 线程，就自动选中它；没有或者有多个时，退出码非零，不写订阅，stderr 里带有 `orchestrator_capabilities` 的指引。
 - worker 在线程状态从 `running` 变为 `idle` 时，对这个项目恰好调用一次 flush；状态不变时不调用。
-- 输出只包含那四个字段。
+- 输出只包含那五个字段。
 - 不传 `--host` 时，`selection-context` 的输出里没有 `Unread comment evidence`；传了 `--host` 时，提醒和现在一样。
 - 删除后，剩下的测试（`events`、`watch`、`lifecycle`）全部通过。
 

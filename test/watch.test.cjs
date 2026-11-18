@@ -257,9 +257,22 @@ test("subscribe strips the artifact from every native host subscription and the 
   const files = [native("claude", "c1"), native("pi", "p1"), native("codex", "x1")];
   for (const file of files) put(file, { artifacts: [a, other], updatedAt: "t" });
   const ours = native("codex", "ryugi-t3-watch");
+  // A half-written Ryugi file and non-json siblings are left byte-identical.
+  const partial = native("pi", "p2"),
+    alive = path.join(state, "pi-comment-watch", "p1.alive");
+  fs.writeFileSync(partial, '{"artifacts":["' + a);
+  fs.writeFileSync(alive, a);
   f.json("subscribe", "--artifact", a);
   for (const file of files) assert.deepEqual(JSON.parse(fs.readFileSync(file)).artifacts, [other]);
   assert.deepEqual(JSON.parse(fs.readFileSync(ours)).artifacts, [a]);
+  assert.equal(fs.readFileSync(partial, "utf8"), '{"artifacts":["' + a);
+  assert.equal(fs.readFileSync(alive, "utf8"), a);
+  // An expired subscription stops stripping.
+  f.json("subscribe", "--artifact", "artboard/brief", "--ttl", "1");
+  await new Promise((r) => setTimeout(r, 1200));
+  put(files[0], { artifacts: ["artboard/brief"] });
+  f.json("subscribe", "--artifact", a);
+  assert.deepEqual(JSON.parse(fs.readFileSync(files[0])).artifacts, ["artboard/brief"]);
   put(files[1], { artifacts: [other, a] });
   await until(() => !JSON.parse(fs.readFileSync(files[1])).artifacts.includes(a));
   f.json("unsubscribe", "--artifact", a);

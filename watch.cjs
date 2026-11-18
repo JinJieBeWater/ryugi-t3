@@ -126,10 +126,13 @@ const find = (db, key) =>
 // Antigravity runs commands inside agy, which does not inherit T3CODE_THREAD_ID.
 // The caller is running, so a single running Antigravity thread in this project is it.
 function antigravityThread(route, project) {
-  let rows = [];
+  let rows = [],
+    failure = "";
   try {
     rows = call(route, "list", "--project", project);
-  } catch {}
+  } catch (e) {
+    failure = e.message;
+  }
   const ids = rows
     .filter((r) => r.providerInstanceId === "antigravity" && r.status === "running" && !r.archived)
     .filter((r) => {
@@ -147,18 +150,20 @@ function antigravityThread(route, project) {
       }
     })
     .map((r) => r.threadId);
-  return ids.length === 1 ? ids[0] : null;
+  return { thread: ids.length === 1 ? ids[0] : null, failure };
 }
 function subscribe(opts) {
   const key = identity(opts);
   const route = transport();
   route.base = path.resolve(opts["base-dir"] || route.base);
-  const thread =
-    opts.thread || process.env.T3CODE_THREAD_ID || antigravityThread(route, key.project);
+  let thread = opts.thread || process.env.T3CODE_THREAD_ID,
+    failure = "";
+  if (!thread) ({ thread, failure } = antigravityThread(route, key.project));
   if (!thread)
     throw new Error(
       "这个 shell 里没有 T3 线程 ID。在 T3 线程里（例如 Antigravity）时，先调用 T3 工具 orchestrator_capabilities，用返回的 parentThreadId 重试：ryugi-t3-watch subscribe --thread <parentThreadId> --artifact " +
-        key.artifact,
+        key.artifact +
+        (failure ? "\n（查找 Antigravity 线程时 t3 thread list 失败：" + failure + "）" : ""),
     );
   const ttl = Number(opts.ttl ?? 7 * 86400);
   if (!Number.isFinite(ttl) || ttl <= 0) throw new Error("Expected positive TTL in seconds");
@@ -283,7 +288,7 @@ async function worker() {
           statuses.set(cacheKey, cached.thread.status);
           if (was === "running" && cached.thread.status !== "running") {
             const owned = snapshot.filter(
-              (s) => s.base === entry.base && s.thread === entry.thread,
+              (s) => s.base === entry.base && s.thread === entry.thread && s.deadline > Date.now(),
             );
             for (const project of new Set(owned.map((s) => s.project)))
               void postToServer(project, "/api/cloud/flush");
