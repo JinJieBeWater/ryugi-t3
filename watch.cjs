@@ -122,12 +122,40 @@ function identity(opts) {
 }
 const find = (db, key) =>
   db.subscriptions.find((r) => r.project === key.project && r.artifact === key.artifact);
+// Antigravity runs commands inside agy, which does not inherit T3CODE_THREAD_ID.
+// The caller is running, so a single running Antigravity thread in this project is it.
+function antigravityThread(route, project) {
+  let rows = [];
+  try {
+    rows = call(route, "list", "--project", project);
+  } catch {}
+  const ids = rows
+    .filter((r) => r.providerInstanceId === "antigravity" && r.status === "running" && !r.archived)
+    .filter((r) => {
+      try {
+        const where =
+          r.worktreePath === undefined
+            ? show({ ...route, thread: r.threadId }, 0).thread.worktreePath
+            : r.worktreePath;
+        return !where || projectRoot(where) === project;
+      } catch {
+        return false;
+      }
+    })
+    .map((r) => r.threadId);
+  return ids.length === 1 ? ids[0] : null;
+}
 function subscribe(opts) {
-  const key = identity(opts),
-    thread = opts.thread || process.env.T3CODE_THREAD_ID;
-  if (!thread) throw new Error("Expected --thread THREAD");
+  const key = identity(opts);
   const route = transport();
   route.base = path.resolve(opts["base-dir"] || route.base);
+  const thread =
+    opts.thread || process.env.T3CODE_THREAD_ID || antigravityThread(route, key.project);
+  if (!thread)
+    throw new Error(
+      "这个 shell 里没有 T3 线程 ID。在 T3 线程里（例如 Antigravity）时，先调用 T3 工具 orchestrator_capabilities，用返回的 parentThreadId 重试：ryugi-t3-watch subscribe --thread <parentThreadId> --artifact " +
+        key.artifact,
+    );
   const ttl = Number(opts.ttl ?? 7 * 86400);
   if (!Number.isFinite(ttl) || ttl <= 0) throw new Error("Expected positive TTL in seconds");
   return locked((db, save) => {

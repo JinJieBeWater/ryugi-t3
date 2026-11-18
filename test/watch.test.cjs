@@ -267,3 +267,44 @@ test("subscribe strips the artifact from every native host subscription and the 
   await new Promise((r) => setTimeout(r, 3000));
   assert.deepEqual(JSON.parse(fs.readFileSync(files[2])).artifacts, [a]);
 });
+test("without a thread id subscribe binds the only running Antigravity thread of the project, otherwise fails with guidance", (t) => {
+  const f = fixture(t),
+    { spawnSync } = require("node:child_process"),
+    { cli } = require("./fixtures.cjs");
+  const elsewhere = path.join(f.dir, "elsewhere");
+  fs.mkdirSync(elsewhere);
+  const ag = (threadId, worktreePath, status = "running") => ({
+    threadId,
+    providerInstanceId: "antigravity",
+    status,
+    worktreePath,
+    archived: false,
+  });
+  f.threads.push(
+    ag("ag", f.project),
+    ag("ag-elsewhere", elsewhere),
+    ag("ag-idle", f.project, "completed"),
+  );
+  put(path.join(f.dir, "threads"), f.threads);
+  const out = JSON.parse(
+    f.run(["subscribe", "--artifact", "artboard/ag"], undefined, { T3CODE_THREAD_ID: "" }),
+  );
+  assert.equal(out.thread, "ag");
+  assert.deepEqual(Object.keys(out).sort(), [
+    "artifact",
+    "createdAt",
+    "deadline",
+    "project",
+    "thread",
+  ]);
+  f.threads.push(ag("ag-2", f.project));
+  put(path.join(f.dir, "threads"), f.threads);
+  const r = spawnSync(cli, ["subscribe", "--artifact", "artboard/ambiguous"], {
+    cwd: f.project,
+    env: { ...f.env, T3CODE_THREAD_ID: "" },
+    encoding: "utf8",
+  });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /orchestrator_capabilities/);
+  assert.ok(!f.json("list").some((s) => s.artifact === "artboard/ambiguous"));
+});

@@ -34,8 +34,10 @@ async function main() {
     return;
   }
   let result;
-  if (op === "subscribe") result = subscribe(values);
-  else if (["status", "list", "unsubscribe", "prune"].includes(op)) result = inspect(op, values);
+  if (op === "subscribe") {
+    const { project, artifact, thread, createdAt, deadline } = subscribe(values);
+    result = { project, artifact, thread, createdAt, deadline };
+  } else if (["status", "list", "unsubscribe", "prune"].includes(op)) result = inspect(op, values);
   else throw Error("Expected subscribe, unsubscribe, status, list or prune");
   console.log(JSON.stringify(result));
 }
