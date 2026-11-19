@@ -27,4 +27,4 @@ ryugi-t3-watch doctor
 
 首次订阅记录现状，续订保留基线并延期（默认七天，`--ttl` 单位秒）。macOS 的单个按需 launchd 作业按状态目录隔离，空表后退出。状态保存在 `${XDG_STATE_HOME:-~/.local/state}/ryugi-t3-watch`。投递回执不明时核对最近 50 条消息，保留未确认记录供 `status` 查看。
 
-运行需要 Node.js 22+、本机 T3 CLI 和位于 `~/.gemini/config/plugins/ryugi` 的 Ryugi 插件（`RYUGI_T3_WATCH_PLUGIN` 可指向别的副本），没有 npm 依赖。运行 `npm test` 验证桥接，真实 launchd 测试使用临时状态目录。`selection-context` 不带 `--host` 时只输出选区，不输出评论提醒。
+运行需要 Node.js 22+、本机 T3 CLI 和 `ryugi install` 安装的 Pi 集成，没有 npm 依赖。桥接默认使用 Ryugi 托管的 `~/.local/share/ryugi/install/plugins/pi/plugin`，不要求 T3 线程使用 Pi，也不固定版本。用 `ryugi update` 更新插件，不要加 `--cli-only`。非默认安装目录或开发检出可用 `RYUGI_T3_WATCH_PLUGIN` 指定插件目录。运行 `npm test` 验证桥接，真实 launchd 测试使用临时状态目录。`selection-context` 不带 `--host` 时只输出选区，不输出评论提醒。

@@ -41,6 +41,21 @@ test("doctor passes against the installed Ryugi plugin and names its version", (
   assert.match(r.stdout, /✔ .*事件/);
 });
 
+test("doctor uses the managed Pi plugin by default even if a Gemini copy exists", (t) => {
+  const f = fixture(t);
+  f.env.HOME = f.dir;
+  delete f.env.RYUGI_T3_WATCH_PLUGIN;
+  put(path.join(f.dir, ".gemini/config/plugins/ryugi/package.json"), { version: "1.0.0" });
+  const managed = path.join(f.dir, ".local/share/ryugi/install/plugins/pi/plugin");
+  put(path.join(managed, "package.json"), { version: "2.0.0" });
+  fs.cpSync(path.join(plugin, "skills/artifacts/app"), path.join(managed, "skills/artifacts/app"), {
+    recursive: true,
+  });
+  const r = raw(f, "doctor");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /Ryugi 2\.0\.0/);
+});
+
 test("a plugin that drops an export fails doctor and subscribe records nothing", (t) => {
   const f = fixture(t);
   pluginCopy(f).breakIt();
