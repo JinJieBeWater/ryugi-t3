@@ -2,7 +2,6 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { app, plugin } = require("./upstream.cjs");
 const { unreadCount, wakeMessage } = app("comment-watch");
-const { humanTokens } = app("comment-threads");
 
 function read(file) {
   try {
@@ -16,7 +15,6 @@ const emptyBaseline = () => ({
   roundStates: {},
   asksLatest: null,
   notifiedSubmits: {},
-  seenComments: {},
 });
 const quote = (s) => "'" + s.replaceAll("'", "'\"'\"'") + "'";
 const sections = {
@@ -74,6 +72,8 @@ function scan(project, artifact, host, baseline, initial = false, opts = {}) {
   const file = read(path.join(root, artifact, "comments.json"));
   const threads = file?.threads ?? [];
   const messages = [];
+  // Left over from when comments were sent on their own.
+  delete baseline.seenComments;
   const commandFor = (argv) => {
     const shown = [opts.launcher || argv[0], ...(opts.proof ? ["--ryugi-session", opts.proof] : []), ...argv.slice(1)];
     const paths = new Set([shown[0], project]);
@@ -85,8 +85,8 @@ function scan(project, artifact, host, baseline, initial = false, opts = {}) {
     const event = { type: "ryugi-" + kind, artifact, command: commandFor(argv), ...fields };
     const message = { kind, text: wakeMessage(event, 500) };
     // T3 has no length cap, so a submit gets its brief inline once rendered outside the store lock.
-    // Comments are not sent on their own; the submit carries whatever is still unread.
-    if (kind !== "comments" && !fields.withdrawn) {
+    // Comments are not sent on their own; a submit carries whatever is still unread.
+    if (!fields.withdrawn) {
       const threadsArgv = listArgv(project, artifact, "comments");
       message.render = {
         ...event,
@@ -106,7 +106,6 @@ function scan(project, artifact, host, baseline, initial = false, opts = {}) {
   const rounds = artifact.startsWith("artboard/")
     ? (read(path.join(state, "rounds.json"))?.rounds ?? [])
     : [];
-  const drafts = rounds.filter((r) => r.state === "open" || baseline.roundStates[r.id] === "open");
   const submits = new Map(),
     withdrawals = new Map();
   for (const thread of threads) {
@@ -162,56 +161,6 @@ function scan(project, artifact, host, baseline, initial = false, opts = {}) {
       }
       baseline.asksLatest = { id: latest.id, withdrawn };
     }
-  }
-  let changed = false,
-    shown = 0,
-    omitted = 0;
-  const brief = [];
-  for (const thread of threads) {
-    if (thread.status === "resolved") continue;
-    const a = thread.anchor || {};
-    const draft =
-      a.ask !== undefined ||
-      a.submit !== undefined ||
-      drafts.some(
-        (r) =>
-          (r.groups || []).includes(a.group) ||
-          (r.boards || []).includes(a.board) ||
-          a.nodes?.some((n) => r.boards?.includes(n.board)),
-      );
-    const human = thread.messages.filter((m) => m.author === "human");
-    const messages = [];
-    humanTokens(thread).forEach(({ token }, i) => {
-      const m = human[i];
-      const key = JSON.stringify([thread.id, m ? "message" : "status", m?.id]);
-      if (baseline.seenComments[key] === token) return;
-      baseline.seenComments[key] = token;
-      if (draft || initial) return;
-      changed = true;
-      if (!m) return;
-      if (shown++ >= 20) {
-        omitted++;
-        return;
-      }
-      const chars = Array.from(new Intl.Segmenter().segment(m.text || ""), (v) => v.segment);
-      messages.push({
-        id: m.id,
-        at: m.at,
-        name: m.name || "human",
-        text: chars.length > 400 ? chars.slice(0, 400).join("") + "…" : m.text || "",
-      });
-    });
-    if (messages.length)
-      brief.push({
-        thread: thread.id,
-        status: thread.status,
-        block: a.blockId || a.board,
-        messages,
-      });
-  }
-  if (changed) {
-    const unread = unreadCount(project, artifact, host);
-    if (unread) emit("comments", { threads: brief, unread, omitted });
   }
   return messages;
 }

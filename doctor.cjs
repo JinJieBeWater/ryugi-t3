@@ -8,11 +8,10 @@ const { locked, label, launch } = require("./store.cjs");
 const { call, show } = require("./t3.cjs");
 const plugin = require("./plugin.cjs");
 const appDir = path.join(plugin, "skills/artifacts/app");
-const modules = ["comment-subscriptions", "comment-watch", "comment-threads", "agent-event"];
+const modules = ["comment-subscriptions", "comment-watch", "agent-event"];
 const needs = {
   "comment-subscriptions": ["projectRoot", "aliveFile", "beat", "subscriptionFile", "checkouts"],
   "comment-watch": ["createCommentWatch", "unreadCount", "wakeMessage"],
-  "comment-threads": ["humanTokens"],
   "agent-event": ["postToServer"],
 };
 function version() {
@@ -24,7 +23,7 @@ function version() {
 }
 // Changes whenever an upgrade replaces any file the bridge loads.
 function fingerprint() {
-  const files = ["package.json", ...[...modules, "ryugi"].map((n) => `skills/artifacts/app/${n}.cjs`)];
+  const files = ["package.json", ...[...modules, "comment-threads", "ryugi"].map((n) => `skills/artifacts/app/${n}.cjs`), "hooks/selection-context.cjs"];
   return files
     .map((f) => {
       try {
@@ -63,13 +62,9 @@ function parity() {
     scan(project, d, "pi", bd, true);
     rounds("submitted");
     put(path.join(root, ".state", d, "asks.json"), { latest: { id: "s1" } });
-    const human = { id: "m", at: "2026-01-01", author: "human", text: "doctor" };
-    put(path.join(root, d, "comments.json"), {
-      threads: [{ id: "t", anchor: {}, status: "open", messages: [human] }],
-    });
     const expected = native(set);
     const ours = [...scan(project, a, "pi", ba), ...scan(project, d, "pi", bd)];
-    const kinds = ["choices", "answers", "comments"];
+    const kinds = ["choices", "answers"];
     for (const kind of kinds) {
       const theirs = expected.filter((e) => e.type === "ryugi-" + kind),
         mine = ours.filter((e) => e.kind === kind);
@@ -84,13 +79,53 @@ function parity() {
     fs.rmSync(project, { recursive: true, force: true });
   }
 }
+// The selection formatters are private to Ryugi's prompt hook, so selection.cjs keeps a copy;
+// run the hook itself on one synthetic project and require the same text.
+function selectionParity() {
+  const { spawnSync } = require("node:child_process");
+  const { selectionContext } = require("./selection.cjs");
+  const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ryugi-t3-doctor-")));
+  try {
+    const state = path.join(project, ".ryugi/artifacts/.state");
+    put(path.join(state, "server-info"), {});
+    const node = { id: "board#7", board: "board", tag: "button", file: "x.html", path: "main > button", tweaks: [] };
+    put(path.join(state, "artboard/doctor/selection.json"), {
+      artifact: "artboard/doctor",
+      updatedAt: "2026-01-01",
+      selected: [node],
+      nodes: [node],
+      tweaks: [{ ...node, property: "color", from: "red", value: "blue" }],
+    });
+    fs.mkdirSync(path.join(project, ".ryugi/artifacts/document/doctor"), { recursive: true });
+    put(path.join(state, "document/doctor/selection.json"), { quote: "selected quote", blockIds: ["b"] });
+    put(path.join(state, "whiteboard/doctor/selection.json"), {
+      selected: [{ id: "shape", type: "rect", text: "rectangle" }],
+    });
+    const env = { PATH: process.env.PATH, HOME: project, XDG_CONFIG_HOME: path.join(project, "config") };
+    const native = spawnSync(process.execPath, [path.join(plugin, "hooks/selection-context.cjs"), project, project], {
+      cwd: project,
+      env,
+      input: "{}",
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    if (native.status !== 0) throw new Error("Ryugi 的 selection-context 退出码 " + native.status);
+    const ours = selectionContext({ cwd: project });
+    if (!ours) throw new Error("桥接没有输出选区");
+    if (native.stdout.trimEnd() !== ours) throw new Error("选区文本与 Ryugi 的 prompt hook 不同");
+    return "artboard、document、whiteboard 选区与 Ryugi 的 prompt hook 一致";
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+}
 function doctor() {
   const checks = [];
-  const check = (name, fn) => {
+  // A soft check only warns: it does not pause forwarding.
+  const check = (name, fn, soft = false) => {
     try {
       checks.push({ name, ok: true, detail: fn() || "" });
     } catch (e) {
-      checks.push({ name, ok: false, detail: e.message.split("\n")[0] });
+      checks.push({ name, ok: false, soft, detail: e.message.split("\n")[0] });
     }
   };
   check("插件", () => {
@@ -115,6 +150,8 @@ function doctor() {
       throw new Error("aliveFile 返回 " + aliveFile("/p", "codex", "s"));
   });
   check("事件对照", parity);
+  // Drift here only affects `selection-context` text, so it warns instead of pausing feedback.
+  check("选区对照", selectionParity, true);
   check("内联摘要", () => {
     const { render } = require("./events.cjs");
     const text = render({
@@ -127,16 +164,16 @@ function doctor() {
     });
     if (!text.endsWith("\nRTW-DOCTOR")) throw new Error("wakeMessage 没有内联提交摘要");
   });
-  return { ok: checks.every((c) => c.ok), version: version(), plugin, checks };
+  return { ok: checks.every((c) => c.ok || c.soft), version: version(), plugin, checks };
 }
 const format = (report) =>
   [
     `Ryugi ${report.version || "?"}（${report.plugin}）`,
-    ...report.checks.map((c) => `${c.ok ? "✔" : "✖"} ${c.name}${c.detail ? "：" + c.detail : ""}`),
+    ...report.checks.map((c) => `${c.ok ? "✔" : c.soft ? "⚠" : "✖"} ${c.name}${c.detail ? "：" + c.detail : ""}`),
   ].join("\n");
 const failures = (report) =>
   report.checks
-    .filter((c) => !c.ok)
+    .filter((c) => !c.ok && !c.soft)
     .map((c) => c.name + "：" + c.detail)
     .join("；");
 // A worker on a failing plugin delivers nothing, so feedback waits in Ryugi's files with the baseline.

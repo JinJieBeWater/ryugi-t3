@@ -1,13 +1,12 @@
 {
   "hooks": {
-    "PostToolUse": [
+    "SessionStart": [
       {
-        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
             "command": "node /Users/jinjiebewater/my/tools/ryugi-t3-watch/claude-hook.cjs",
-            "timeout": 40
+            "timeout": 10
           }
         ]
       }

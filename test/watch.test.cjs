@@ -25,7 +25,7 @@ test("durable launchd watcher delivers changes since subscribe, survives restart
     put(stateFile(a, "rounds"), { rounds: [{ id: "r", state, groups: ["g"] }] });
   const comments = (id, threads) => put(path.join(f.root, id, "comments.json"), { threads });
   const ask = (id, withdrawn) => put(stateFile(d, "asks"), { latest: { id, withdrawn } });
-  const subscribe = (id) => f.json("subscribe", "--artifact", id, "--host", "pi");
+  const subscribe = (id) => f.json("subscribe", "--artifact", id);
   const status = (id) => f.json("status", "--artifact", id);
   const expectMessage = async (n, pattern) => {
     await until(() => f.sent().length >= n);
@@ -187,11 +187,14 @@ test("a provable spawn failure backs off and a later retry sends once", async (t
   await until(() => f.sent().length === 1);
   await until(() => f.json("status", "--artifact", a).pending.length === 0);
 });
-test("concurrent subscriptions survive atomic writes, prune only expires elapsed leases", async (t) => {
+test("concurrent subscriptions survive atomic writes, the worker drops only elapsed leases", async (t) => {
   const f = fixture(t),
     { execFile } = require("node:child_process"),
     { promisify } = require("node:util"),
     { cli } = require("./fixtures.cjs");
+  // An idle thread: a running one would keep renewing the short lease.
+  f.threads[0].status = "completed";
+  put(path.join(f.dir, "threads"), f.threads);
   await Promise.all(
     ["a", "b", "c", "d"].map((id) =>
       promisify(execFile)(cli, ["subscribe", "--artifact", "document/" + id], {
@@ -202,9 +205,20 @@ test("concurrent subscriptions survive atomic writes, prune only expires elapsed
   );
   assert.equal(f.json("list").length, 4);
   f.json("subscribe", "--artifact", "document/short", "--ttl", "0.1");
-  await new Promise((r) => setTimeout(r, 200));
-  f.json("prune");
-  assert.equal(f.json("list").length, 4);
+  await until(() => f.json("list").length === 4);
+  assert.ok(!f.json("list").some((s) => s.artifact === "document/short"));
+});
+test("a running thread keeps its lease; once idle the lease runs out", async (t) => {
+  const f = fixture(t),
+    a = "document/lease";
+  f.json("subscribe", "--artifact", a, "--ttl", "2");
+  const first = f.json("status", "--artifact", a).deadline;
+  await new Promise((r) => setTimeout(r, 3000));
+  const renewed = f.json("status", "--artifact", a);
+  assert.ok(renewed && renewed.deadline > first, "renewed while running");
+  f.threads[0].status = "completed";
+  put(path.join(f.dir, "threads"), f.threads);
+  await until(() => f.json("status", "--artifact", a) === null, 8000);
 });
 test("comments wait for the next submit, which counts only what the thread's provider has not read", async (t) => {
   const f = fixture(t),
@@ -250,7 +264,7 @@ test("worker publishes viewer listening heartbeat while subscribed and clears it
     dir = path.join(f.root, ".state/codex-comment-watch"),
     sub = path.join(dir, "ryugi-t3-watch.json"),
     alive = path.join(dir, "ryugi-t3-watch.alive");
-  f.json("subscribe", "--artifact", a, "--host", "pi");
+  f.json("subscribe", "--artifact", a);
   await until(() => fs.existsSync(sub) && fs.existsSync(alive));
   assert.deepEqual(JSON.parse(fs.readFileSync(sub, "utf8")), { artifacts: [a] });
   const stamp = Number(fs.readFileSync(alive, "utf8"));

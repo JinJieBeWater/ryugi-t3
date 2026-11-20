@@ -1,13 +1,9 @@
-// The installed Ryugi hook only exports its reminder functions. Keep the private
-// selection formatters aligned with hooks/selection-context.cjs (Ryugi 1.81).
+// Ryugi's prompt hook (hooks/selection-context.cjs) exports only its reminder functions, so its
+// selection formatters are copied here. `doctor` runs the hook on a synthetic project and fails
+// if the text differs; when it does, copy the formatters again.
 const fs = require("node:fs");
 const path = require("node:path");
-const { plugin, checkouts, projectRoot } = require("./upstream.cjs");
-const { load } = require("./store.cjs");
-const { transport } = require("./watch.cjs");
-const { autoPublishContext, commentReminders } = require(
-  path.join(plugin, "hooks/selection-context.cjs"),
-);
+const { projectRoot } = require("./upstream.cjs");
 const MAX_CONTEXT = 8000;
 const MAX_HTML = 600;
 
@@ -165,46 +161,23 @@ function whiteboardSelections(session, root, budget) {
   return sections;
 }
 
+// Selections only: unread comments now reach the agent with a submit, or when the user mentions them.
 function selectionContext(opts) {
   let session = opts.cwd || process.cwd();
   try {
     session = fs.realpathSync(session);
   } catch {}
-  const project = projectRoot(session);
-  const { host, prompt = "" } = opts;
-  const owner = Object.hasOwn(opts, "thread") ? opts.thread : process.env.T3CODE_THREAD_ID;
-  const root = path.join(project, ".ryugi/artifacts");
+  const root = path.join(projectRoot(session), ".ryugi/artifacts");
   const state = path.join(root, ".state");
   if (!fs.existsSync(path.join(state, "server-info"))) return "";
-  const db = load();
-  const { base } = transport();
-  const related = new Set(checkouts(project));
-  const byProject = new Map();
-  for (const sub of db.subscriptions) {
-    if (sub.project === project || sub.deadline <= Date.now() || sub.base !== base) continue;
-    if (owner ? sub.thread !== owner : !related.has(sub.project)) continue;
-    if (!byProject.has(sub.project)) byProject.set(sub.project, new Set());
-    byProject.get(sub.project).add(sub.artifact);
-  }
-  const elsewhere = [...byProject].map(([other, artifacts]) =>
-    commentReminders(other, path.join(other, ".ryugi/artifacts"), host, artifacts),
-  );
-  // Unread counts are per host review key; without one every comment would look unread.
-  const reminders = [
-    ...(host ? [commentReminders(project, root, host), ...elsewhere] : []),
-    autoPublishContext(project, process.env, ""),
-  ]
-    .filter(Boolean)
-    .join("\n\n");
   const files = selectionFiles(state).sort((a, b) =>
     String(b.value.updatedAt).localeCompare(String(a.value.updatedAt)),
   );
   const sections = [];
-  // Reminders are capped at MAX_REMINDERS and reserved first so a large artboard selection cannot crowd them out.
-  let left = MAX_CONTEXT - (reminders ? reminders.length + 2 : 0);
+  let left = MAX_CONTEXT;
   for (const entry of files) {
     if (left <= 0) break;
-    const section = describe(session, entry, prompt, left);
+    const section = describe(session, entry, "", left);
     if (!section) continue;
     sections.push(section);
     left -= section.length + 2;
@@ -213,7 +186,6 @@ function selectionContext(opts) {
   sections.push(...documents);
   for (const section of documents) left -= section.length + 2;
   sections.push(...whiteboardSelections(session, root, left));
-  if (reminders) sections.push(reminders);
   return sections.join("\n\n");
 }
 module.exports = { selectionContext };

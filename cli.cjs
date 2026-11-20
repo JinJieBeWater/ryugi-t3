@@ -15,7 +15,7 @@ async function main() {
     return require("./watch.cjs").worker(print);
   }
   const options = Object.fromEntries(
-    ["cwd", "project", "artifact", "thread", "base-dir", "ttl", "host", "prompt", "launcher", "ryugi-session"].map((k) => [
+    ["cwd", "project", "artifact", "thread", "base-dir", "ttl", "launcher", "ryugi-session"].map((k) => [
       k,
       { type: "string" },
     ]),
@@ -33,9 +33,9 @@ async function main() {
       throw Error("Ryugi 插件未通过兼容自检，没有订阅。告诉用户这一点和下面的结果：\n" + format(report));
     const { project, artifact, thread, createdAt, deadline } = require("./watch.cjs").subscribe(values);
     result = { project, artifact, thread, createdAt, deadline };
-  } else if (["status", "list", "unsubscribe", "prune"].includes(op))
+  } else if (["status", "list", "unsubscribe"].includes(op))
     result = require("./watch.cjs").inspect(op, values);
-  else throw Error("Expected subscribe, doctor, selection-context, unsubscribe, status, list or prune");
+  else throw Error("Expected subscribe, doctor, selection-context, unsubscribe, status or list");
   console.log(JSON.stringify(result));
 }
 main().catch((e) => {

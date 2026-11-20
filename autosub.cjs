@@ -1,5 +1,4 @@
-// Auto-subscribe for a `ryugi.cjs start` an agent ran in a T3 thread. preload.cjs feeds it the real
-// argv; claude-hook.cjs feeds it words split from Claude's Bash command, since Claude strips NODE_OPTIONS.
+// Auto-subscribe for a `ryugi.cjs start` an agent ran in a T3 thread; preload.cjs feeds it the real argv.
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 // Same types as Ryugi's comment subscriptions; the others send no feedback.
@@ -22,7 +21,7 @@ function target(argv, cwd) {
 }
 
 // Subscribes and returns what the agent should be told. launcher is the script it ran;
-// selection: false leaves out the selection hint (Claude gets the selection from Ryugi's own hook);
+// selection: false leaves out the selection hint (Ryugi's prompt hook already shows it to Claude);
 // sandboxed: true adds the way out of Codex's sandbox to the failure message.
 function subscribe({ artifact, project, proof }, cwd, { launcher, selection = true, sandboxed = false } = {}) {
   const env = { ...process.env };

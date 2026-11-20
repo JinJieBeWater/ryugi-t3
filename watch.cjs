@@ -126,7 +126,7 @@ function subscribe(opts) {
     let r = find(db, key);
     if (!r || r.thread !== thread || r.base !== route.base || r.deadline <= now) {
       const baseline = emptyBaseline();
-      scan(key.project, key.artifact, opts.host, baseline, true);
+      scan(key.project, key.artifact, null, baseline, true);
       db.subscriptions = db.subscriptions.filter((other) => other !== r);
       r = { ...key, thread, createdAt: now, baseline, pending: [], generation: randomUUID() };
       db.subscriptions.push(r);
@@ -137,8 +137,8 @@ function subscribe(opts) {
       r.proof = opts["ryugi-session"] || undefined;
     }
     Object.assign(r, route, {
-      hostReviewKey: opts.host || r.hostReviewKey || "Codex",
       updatedAt: now,
+      ttl,
       deadline: now + ttl * 1000,
     });
     save();
@@ -153,11 +153,9 @@ function inspect(op, opts) {
   return locked((db, save) => {
     const now = Date.now(),
       old = db.subscriptions.length,
-      target = op === "unsubscribe" ? find(db, identity(opts)) : null,
+      target = find(db, identity(opts)),
       touched = new Set(db.subscriptions.map((r) => r.project));
-    db.subscriptions = db.subscriptions.filter((r) =>
-      op === "prune" ? r.deadline > now : r !== target,
-    );
+    db.subscriptions = db.subscriptions.filter((r) => r !== target);
     save();
     for (const project of touched) syncProjectHeartbeat(project, db.subscriptions, now);
     return { removed: old - db.subscriptions.length };
@@ -281,19 +279,24 @@ async function worker(print) {
             return false;
           }
           if (r.deadline <= Date.now()) return false;
+          // A thread still at work keeps its lease: the TTL counts from its last running turn.
+          let renewed = false;
+          const lease = (r.ttl ?? 7 * 86400) * 1000;
+          if (cached.thread.status === "running" && r.deadline - Date.now() < lease - Math.min(60000, lease / 10)) {
+            r.deadline = Date.now() + lease;
+            renewed = true;
+          }
           const before = JSON.stringify(r.baseline);
-          const host = keys[cached.thread.providerInstanceId] || r.hostReviewKey;
-          // Only a click in the viewer (submit or withdraw) is sent; comments ride along with the next submit.
+          const host = keys[cached.thread.providerInstanceId] || "Codex";
+          // Only a click in the viewer (submit or withdraw) is sent; comments ride along with a submit.
           const changes = scan(r.project, r.artifact, host, r.baseline, false, {
             launcher: r.launcher,
             proof: r.proof,
-          }).filter((event) => event.kind !== "comments");
+          });
           for (const event of changes)
             r.pending.push({ ...event, id: randomUUID(), state: "ready" });
-          if (changes.length || JSON.stringify(r.baseline) !== before) {
-            lastActive = Date.now();
-            save();
-          }
+          if (changes.length || JSON.stringify(r.baseline) !== before) lastActive = Date.now();
+          if (renewed || changes.length || JSON.stringify(r.baseline) !== before) save();
           deliver(r, db, save);
           return changes.length > 0;
         });
