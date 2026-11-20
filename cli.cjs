@@ -15,7 +15,7 @@ async function main() {
     return require("./watch.cjs").worker(print);
   }
   const options = Object.fromEntries(
-    ["cwd", "project", "artifact", "thread", "base-dir", "ttl", "host", "prompt"].map((k) => [
+    ["cwd", "project", "artifact", "thread", "base-dir", "ttl", "host", "prompt", "launcher", "ryugi-session"].map((k) => [
       k,
       { type: "string" },
     ]),

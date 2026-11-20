@@ -13,7 +13,9 @@
   function subscribe() {
     if (done) return;
     done = true;
-    process.stderr.write(autosub.subscribe(goal, cwd) + "\n");
+    // Only Codex runs agent shells in a sandbox that can block the bridge's state directory.
+    const sandboxed = Boolean(process.env.CODEX_THREAD_ID || process.env.CODEX_SANDBOX);
+    process.stderr.write(autosub.subscribe(goal, cwd, { launcher: script, sandboxed }) + "\n");
   }
   // A start without --background may stay up; subscribe while it runs.
   setTimeout(subscribe, 3000).unref();

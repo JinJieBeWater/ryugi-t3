@@ -96,3 +96,35 @@ test("withdrawals and comments stay bounded and are not rendered", (t) => {
   assert.deepEqual(events.map((e) => e.kind).sort(), ["choices", "comments"]);
   assert.ok(events.every((e) => e.render === undefined));
 });
+
+test("Run lines use the launcher and session proof the agent started with", (t) => {
+  const { scan, emptyBaseline } = require("../events.cjs");
+  const f = fixture(t);
+  const d = "document/bound";
+  put(path.join(f.root, d, "comments.json"), { threads: [] });
+  const b = emptyBaseline();
+  scan(f.project, d, "Codex", b, true);
+  put(path.join(f.root, ".state", d, "asks.json"), { latest: { id: "s", withdrawn: false } });
+  scan(f.project, d, "Codex", b);
+  put(path.join(f.root, ".state", d, "asks.json"), { latest: { id: "s", withdrawn: true } });
+  const [withdrawn] = scan(f.project, d, "Codex", b, false, { launcher: "/codex/app/ryugi.cjs", proof: "x:y" });
+  assert.match(withdrawn.text, /Run: node '\/codex\/app\/ryugi\.cjs' --ryugi-session x:y comment list/);
+});
+
+test("a rendered brief lists as the thread's host and names the agent's own launcher", () => {
+  const { render } = require("../events.cjs");
+  const before = process.env.AI_AGENT;
+  const print = `console.log("Reply: node /x/ryugi.cjs comment reply; as " + process.env.AI_AGENT)`;
+  const text = render({
+    type: "ryugi-answers",
+    artifact: "document/d",
+    submit: "s",
+    questions: 1,
+    command: "x",
+    argv: ["-e", print],
+    followUp: { project: "/nowhere", host: "Codex", argv: [], command: "y" },
+    rebind: { from: "/x/ryugi.cjs", to: "'/codex/ryugi.cjs' --ryugi-session a:b" },
+  });
+  assert.match(text, /\nReply: node '\/codex\/ryugi\.cjs' --ryugi-session a:b comment reply; as codex$/);
+  assert.equal(process.env.AI_AGENT, before);
+});

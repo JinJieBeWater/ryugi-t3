@@ -75,15 +75,10 @@ test("an upgrade that breaks the bridge pauses delivery with one notice and resu
     a = "document/upgrade",
     file = path.join(f.root, a, "comments.json");
   const copy = pluginCopy(f);
-  const thread = (id, text) => ({
-    id,
-    anchor: {},
-    status: "open",
-    messages: [{ id: "m" + id, at: "2026-01-01", text, author: "human" }],
-  });
+  const ask = (id) => put(path.join(f.root, ".state", a, "asks.json"), { latest: { id } });
   put(file, { threads: [] });
   f.json("subscribe", "--artifact", a);
-  put(file, { threads: [thread("one", "before upgrade")] });
+  ask("before-upgrade");
   await until(() => f.sent().length === 1);
   const flag = (name, on) =>
     on ? fs.writeFileSync(path.join(f.dir, name), "") : fs.rmSync(path.join(f.dir, name));
@@ -101,11 +96,11 @@ test("an upgrade that breaks the bridge pauses delivery with one notice and resu
   flag("lose", false);
   await until(() => f.json("list")[0].notice, 15000);
   assert.equal(f.sent().length, 2);
-  put(file, { threads: [thread("one", "before upgrade"), thread("two", "while broken")] });
+  ask("while-broken");
   await new Promise((r) => setTimeout(r, 4000));
   assert.equal(f.sent().length, 2);
   copy.fix();
   await until(() => f.sent().length === 3, 30000);
-  assert.match(f.sent()[2].text, /while broken/);
-  assert.doesNotMatch(f.sent()[2].text, /before upgrade/);
+  assert.match(f.sent()[2].text, /while-broken/);
+  assert.doesNotMatch(f.sent()[2].text, /before-upgrade/);
 });

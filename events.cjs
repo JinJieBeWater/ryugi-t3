@@ -40,23 +40,67 @@ const listArgv = (project, artifact, kind) => [
   artifact,
 ];
 // Runs Ryugi's list command for up to 15 s; a failed read keeps the Run command.
-const render = (event) => wakeMessage(event, Infinity);
+// A submit also brings the comments still unread when it renders, in Ryugi's own comments format.
+// The worker runs outside any agent, so Ryugi's CLI is told whose unread comments to list
+// (AI_AGENT wins over its environment sniffing).
+const agents = { "Claude Code": "claude", Codex: "codex", Antigravity: "antigravity", pi: "pi", Grok: "grok" };
+function render(event) {
+  const f = event.followUp;
+  const before = process.env.AI_AGENT;
+  if (agents[f?.host]) process.env.AI_AGENT = agents[f.host];
+  const rebind = (text) => {
+    const r = event.rebind;
+    if (!r) return text;
+    const from = r.from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return text.replace(new RegExp(`(["']?)${from}\\1`, "g"), () => r.to);
+  };
+  try {
+    const text = wakeMessage(event, Infinity);
+    const unread = f ? unreadCount(f.project, event.artifact, f.host) : 0;
+    if (!unread) return rebind(text);
+    const comments = { type: "ryugi-comments", artifact: event.artifact, unread, command: f.command, argv: f.argv };
+    return rebind(text + "\n\n" + wakeMessage(comments, Infinity));
+  } finally {
+    if (before === undefined) delete process.env.AI_AGENT;
+    else process.env.AI_AGENT = before;
+  }
+}
 
-function scan(project, artifact, host, baseline, initial = false) {
+// opts.launcher and opts.proof are the launcher the agent ran start with, so the Run line it is
+// shown works in its host (Codex binds commands to --ryugi-session). The bridge itself reads with argv.
+function scan(project, artifact, host, baseline, initial = false, opts = {}) {
   const root = path.join(project, ".ryugi/artifacts");
   const state = path.join(root, ".state", artifact);
   const file = read(path.join(root, artifact, "comments.json"));
   const threads = file?.threads ?? [];
   const messages = [];
+  const commandFor = (argv) => {
+    const shown = [opts.launcher || argv[0], ...(opts.proof ? ["--ryugi-session", opts.proof] : []), ...argv.slice(1)];
+    const paths = new Set([shown[0], project]);
+    return ["node", ...shown].map((x) => (paths.has(x) ? quote(x) : x)).join(" ");
+  };
   function emit(kind, fields) {
     if (initial) return;
     const argv = listArgv(project, artifact, kind);
-    const paths = new Set([argv[0], project]);
-    const command = ["node", ...argv].map((x) => (paths.has(x) ? quote(x) : x)).join(" ");
-    const event = { type: "ryugi-" + kind, artifact, command, ...fields };
+    const event = { type: "ryugi-" + kind, artifact, command: commandFor(argv), ...fields };
     const message = { kind, text: wakeMessage(event, 500) };
     // T3 has no length cap, so a submit gets its brief inline once rendered outside the store lock.
-    if (kind !== "comments" && !fields.withdrawn) message.render = { ...event, argv };
+    // Comments are not sent on their own; the submit carries whatever is still unread.
+    if (kind !== "comments" && !fields.withdrawn) {
+      const threadsArgv = listArgv(project, artifact, "comments");
+      message.render = {
+        ...event,
+        argv,
+        followUp: { project, host, argv: threadsArgv, command: commandFor(threadsArgv) },
+        // The brief's Check/Reply/Resolve lines name the bridge's launcher; the agent gets its own.
+        ...(opts.launcher && {
+          rebind: {
+            from: argv[0],
+            to: quote(opts.launcher) + (opts.proof ? " --ryugi-session " + opts.proof : ""),
+          },
+        }),
+      };
+    }
     messages.push(message);
   }
   const rounds = artifact.startsWith("artboard/")

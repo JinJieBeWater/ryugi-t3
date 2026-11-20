@@ -4,7 +4,6 @@ const path = require("node:path");
 const { setTimeout: sleep } = require("node:timers/promises");
 const { randomUUID } = require("node:crypto");
 const { projectRoot, aliveFile, beat, subscriptionFile, app } = require("./upstream.cjs");
-const { unreadCount } = app("comment-watch");
 const { postToServer } = app("agent-event");
 const { atomic, stateRoot, locked, load, label, launch } = require("./store.cjs");
 const { scan, emptyBaseline, render } = require("./events.cjs");
@@ -132,6 +131,11 @@ function subscribe(opts) {
       r = { ...key, thread, createdAt: now, baseline, pending: [], generation: randomUUID() };
       db.subscriptions.push(r);
     }
+    // The launcher the agent ran start with (and Codex's session proof) goes into Run lines it is shown.
+    if (opts.launcher) {
+      r.launcher = path.resolve(opts.launcher);
+      r.proof = opts["ryugi-session"] || undefined;
+    }
     Object.assign(r, route, {
       hostReviewKey: opts.host || r.hostReviewKey || "Codex",
       updatedAt: now,
@@ -197,12 +201,6 @@ function deliver(r, db, save) {
       item.state = "uncertain";
       backoff(item);
     }
-    save();
-    return;
-  }
-  const host = keys[detail.thread.providerInstanceId] || r.hostReviewKey;
-  if (item.kind === "comments" && unreadCount(r.project, r.artifact, host) === 0) {
-    r.pending.splice(index, 1);
     save();
     return;
   }
@@ -285,7 +283,11 @@ async function worker(print) {
           if (r.deadline <= Date.now()) return false;
           const before = JSON.stringify(r.baseline);
           const host = keys[cached.thread.providerInstanceId] || r.hostReviewKey;
-          const changes = scan(r.project, r.artifact, host, r.baseline);
+          // Only a click in the viewer (submit or withdraw) is sent; comments ride along with the next submit.
+          const changes = scan(r.project, r.artifact, host, r.baseline, false, {
+            launcher: r.launcher,
+            proof: r.proof,
+          }).filter((event) => event.kind !== "comments");
           for (const event of changes)
             r.pending.push({ ...event, id: randomUUID(), state: "ready" });
           if (changes.length || JSON.stringify(r.baseline) !== before) {

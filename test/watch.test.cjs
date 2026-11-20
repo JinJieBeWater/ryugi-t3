@@ -12,6 +12,10 @@ const thread = (id, text, anchor = {}) => ({
   messages: [{ id: "m" + id, at: "2026-01-01", text, author: "human" }],
 });
 
+// A click on Submit in a document's answer bar.
+const submitAnswers = (f, artifact, id) =>
+  put(path.join(f.root, ".state", artifact, "asks.json"), { latest: { id } });
+
 test("durable launchd watcher delivers changes since subscribe, survives restart and reconciles lost output", async (t) => {
   const f = fixture(t),
     a = "artboard/layout",
@@ -57,7 +61,8 @@ test("durable launchd watcher delivers changes since subscribe, survives restart
   assert.equal(f.sent().length, 4);
   rounds("submitted");
   await expectMessage(5, /Ryugi choices.*submitted/);
-  const threads = [thread("old", "before"), draft];
+  // Comments alone send nothing; each submit carries the comments its provider has not read.
+  const threads = [];
   for (const [provider, key] of [
     ["codex", "Codex"],
     ["antigravity", "Antigravity"],
@@ -71,29 +76,31 @@ test("durable launchd watcher delivers changes since subscribe, survives restart
     const review = path.join(
       f.root,
       ".state/agent-review",
-      "agent-" + reviewStateKey(a, key) + ".json",
+      "agent-" + reviewStateKey(d, key) + ".json",
     );
     threads.push(ack);
     put(review, { consumed: threads.flatMap(humanTokens).map((x) => x.token) });
     await new Promise((r) => setTimeout(r, 3300));
-    comments(a, threads);
+    threads.push(thread(provider, "new for " + key));
+    comments(d, threads);
     const count = f.sent().length;
     await new Promise((r) => setTimeout(r, 3200));
-    assert.equal(f.sent().length, count, "ack for " + key);
-    threads.push(thread(provider, "new for " + key));
-    comments(a, threads);
-    await expectMessage(count + 1, new RegExp("new for " + key));
+    assert.equal(f.sent().length, count, "comment alone for " + key);
+    submitAnswers(f, d, "submit-" + provider);
+    await expectMessage(
+      count + 1,
+      new RegExp("submit-" + provider + "[^]*\\n\\nRyugi comments document/doc \\(1 unread\\)"),
+    );
   }
   const count = f.sent().length;
   assert.equal(count, 9);
   f.launch("remove", f.label);
   await until(() => f.launch("list", f.label).status !== 0);
-  threads.push(thread("offline", "while stopped"));
-  comments(a, threads);
+  submitAnswers(f, d, "while-stopped");
   fs.writeFileSync(path.join(f.dir, "lose"), "");
-  subscribe(a);
-  await expectMessage(count + 1, /while stopped/);
-  await until(() => status(a).pending.length === 0);
+  subscribe(d);
+  await expectMessage(count + 1, /while-stopped/);
+  await until(() => status(d).pending.length === 0);
   assert.equal(f.sent().length, count + 1);
   f.threads[0].archived = true;
   put(path.join(f.dir, "threads"), f.threads);
@@ -122,26 +129,28 @@ test("standing submit outlives stale open state, ownership transfer snapshots hi
   put(path.join(f.dir, "threads"), f.threads);
   put(cf, { threads: [record, thread("prior", "prior owner")] });
   f.json("subscribe", "--thread", "other", "--artifact", a);
-  put(cf, { threads: [record, thread("prior", "prior owner"), thread("new", "new owner")] });
+  // The standing submit belongs to the old owner's history and is not sent again.
+  await new Promise((r) => setTimeout(r, 3200));
+  assert.equal(f.sent().filter((x) => x.thread === "other").length, 0);
+  const again = thread("submit2", "", { round: "r", submit: true });
+  again.messages[0].at = "2026-01-02";
+  put(cf, { threads: [record, thread("prior", "prior owner"), again] });
   await until(() => f.sent().some((x) => x.thread === "other"));
   const newOwner = f.sent().filter((x) => x.thread === "other");
   assert.equal(newOwner.length, 1);
-  assert.match(newOwner[0].text, /new owner/);
-  assert.doesNotMatch(newOwner[0].text, /prior owner/);
+  assert.match(newOwner[0].text, /Ryugi choices artboard\/choice round r submitted \(submit2\)/);
   f.json("unsubscribe", "--artifact", a);
   await until(() => f.launch("list", f.label).status !== 0);
 });
 
 test("an unresolved receipt survives restart without blocking later independent feedback", async (t) => {
   const f = fixture(t),
-    a = "slides/deck",
-    file = path.join(f.root, a, "comments.json");
+    a = "document/deck";
   const sub = () => f.json("subscribe", "--artifact", a);
   const pending = () => f.json("status", "--artifact", a).pending;
   sub();
   fs.writeFileSync(path.join(f.dir, "drop"), "");
-  const old = thread("first", "first event");
-  put(file, { threads: [old] });
+  submitAnswers(f, a, "first-event");
   await until(() => pending()[0]?.state === "uncertain");
   f.launch("remove", f.label);
   await until(() => f.launch("list", f.label).status !== 0);
@@ -153,20 +162,19 @@ test("an unresolved receipt survives restart without blocking later independent 
   put(dbFile, db);
   fs.unlinkSync(path.join(f.dir, "drop"));
   sub();
-  const newer = thread("second", "later feedback");
-  put(file, { threads: [old, newer] });
+  submitAnswers(f, a, "later-feedback");
   await until(() => f.sent().length === 1, 5500);
-  assert.match(f.sent()[0].text, /later feedback/);
+  assert.match(f.sent()[0].text, /later-feedback/);
   await until(() => pending().length === 1 && pending()[0].state === "uncertain");
   assert.equal(pending()[0].state, "uncertain");
-  assert.match(pending()[0].text, /first event/);
+  assert.match(pending()[0].text, /first-event/);
 });
 test("a provable spawn failure backs off and a later retry sends once", async (t) => {
   const f = fixture(t),
-    a = "whiteboard/shape";
+    a = "document/shape";
   f.json("subscribe", "--artifact", a);
   fs.writeFileSync(path.join(f.dir, "uninstall-once"), "");
-  put(path.join(f.root, a, "comments.json"), { threads: [thread("item", "deliver once")] });
+  submitAnswers(f, a, "deliver-once");
   await until(
     () =>
       fs.existsSync(f.mock + ".offline") &&
@@ -198,27 +206,29 @@ test("concurrent subscriptions survive atomic writes, prune only expires elapsed
   f.json("prune");
   assert.equal(f.json("list").length, 4);
 });
-test("a queued comment acknowledged on the new provider is silent when transport recovers", async (t) => {
+test("comments wait for the next submit, which counts only what the thread's provider has not read", async (t) => {
   const f = fixture(t),
     a = "document/unread";
   f.json("subscribe", "--artifact", a);
-  fs.writeFileSync(path.join(f.dir, "uninstall-once"), "");
   const evidence = thread("new", "already read by Antigravity");
   put(path.join(f.root, a, "comments.json"), { threads: [evidence] });
-  await until(
-    () =>
-      fs.existsSync(f.mock + ".offline") &&
-      f.json("status", "--artifact", a).pending[0]?.state === "ready",
-  );
+  await new Promise((r) => setTimeout(r, 3200));
+  assert.equal(f.sent().length, 0);
   f.threads[0].providerInstanceId = "antigravity";
   put(path.join(f.dir, "threads"), f.threads);
   put(
     path.join(f.root, ".state/agent-review", "agent-" + reviewStateKey(a, "Antigravity") + ".json"),
     { consumed: humanTokens(evidence).map((x) => x.token) },
   );
-  fs.renameSync(f.mock + ".offline", f.mock);
-  await until(() => f.json("status", "--artifact", a).pending.length === 0);
-  assert.equal(f.sent().length, 0);
+  // Let the worker's cached thread detail expire so it sees the new provider.
+  await new Promise((r) => setTimeout(r, 3300));
+  submitAnswers(f, a, "all-read");
+  await until(() => f.sent().length === 1);
+  assert.doesNotMatch(f.sent()[0].text, /Ryugi comments/);
+  put(path.join(f.root, a, "comments.json"), { threads: [evidence, thread("fresh", "unread")] });
+  submitAnswers(f, a, "one-unread");
+  await until(() => f.sent().length === 2);
+  assert.match(f.sent()[1].text, /one-unread[^]*\n\nRyugi comments document\/unread \(1 unread\)/);
 });
 test("a standing submission predating subscription stays silent when rounds.json is rebuilt", async (t) => {
   const f = fixture(t),
@@ -324,7 +334,7 @@ test("worker flushes the project once when its subscribed thread stops running",
   await new Promise((r) => setTimeout(r, 3000));
   assert.deepEqual(hits, [encodeURIComponent(f.project)]);
 });
-test("an idle thread is rarely asked about, yet a new comment is sent at once and its turn is watched", async (t) => {
+test("an idle thread is rarely asked about, yet a new submit is sent at once and its turn is watched", async (t) => {
   const f = fixture(t),
     a = "document/idle",
     file = path.join(f.root, a, "comments.json");
@@ -336,19 +346,10 @@ test("an idle thread is rarely asked about, yet a new comment is sent at once an
   assert.ok(f.shows(0) <= 1, "idle polls: " + f.shows(0));
   const asked = f.shows(0),
     at = Date.now();
-  put(file, {
-    threads: [
-      {
-        id: "t",
-        anchor: {},
-        status: "open",
-        messages: [{ id: "m", at: "2026-01-01", text: "idle comment", author: "human" }],
-      },
-    ],
-  });
+  submitAnswers(f, a, "idle-submit");
   await until(() => f.sent().length === 1);
   assert.ok(Date.now() - at < 4000);
-  assert.match(f.sent()[0].text, /idle comment/);
+  assert.match(f.sent()[0].text, /idle-submit/);
   await until(() => f.shows(0) > asked, 4000);
 });
 test("a store written by the hook era keeps working and drops its session bindings", (t) => {
@@ -400,12 +401,12 @@ test("a submit brief renders outside the store lock and is sent inline, ahead of
   put(dbFile, db);
   f.json("subscribe", "--artifact", a);
   await until(() => fs.existsSync(started));
-  put(path.join(f.root, a, "comments.json"), { threads: [thread("later", "after submit")] });
+  put(path.join(f.root, ".state", a, "rounds.json"), { rounds: [{ id: "r2", state: "submitted" }] });
   const t0 = Date.now();
   f.json("subscribe", "--artifact", "document/other");
   assert.ok(Date.now() - t0 < 2500, "subscribe waited on the render");
   await until(() => f.sent().length === 2);
   assert.match(f.sent()[0].text, /^Ryugi choices artboard\/inline round r submitted.*\nBRIEF a\nBRIEF b$/s);
-  assert.match(f.sent()[1].text, /after submit/);
+  assert.match(f.sent()[1].text, /round r2 submitted/);
   await until(() => f.json("status", "--artifact", a).pending.length === 0);
 });
