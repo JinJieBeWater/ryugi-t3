@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 // Claude Code SessionStart hook, set only for T3 threads through the Claude launch argument
 // `--settings <this dir>/claude-settings.json`. Claude strips NODE_OPTIONS from the environment its Bash
-// commands inherit but sources CLAUDE_ENV_FILE before each one, so the preload goes there and a
+// commands inherit but sources CLAUDE_ENV_FILE before each one, so the preload stub goes there and a
 // `ryugi.cjs start` subscribes the same way as under the other providers.
 const fs = require("node:fs");
 const path = require("node:path");
-const preload = path.join(__dirname, "preload.cjs");
+const { stubPath } = require("./entry.cjs");
 const sq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
 
 function exports_(input, env = process.env) {
   if (!env.T3CODE_THREAD_ID) return "";
+  // The same stub file the other providers load (see entry.cjs); without it node would fail to start.
+  const preload = stubPath(env);
+  if (!fs.existsSync(preload)) return "";
   const lines = [
     // Node reads double-quoted NODE_OPTIONS values, so a path with spaces still loads.
     // A resumed session sources one env file per SessionStart; add the preload once.

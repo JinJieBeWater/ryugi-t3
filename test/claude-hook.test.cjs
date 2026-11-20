@@ -7,11 +7,18 @@ const { fixture } = require("./fixtures.cjs");
 const hook = path.join(__dirname, "..", "claude-hook.cjs");
 
 // Runs the SessionStart hook, then a Bash command the way Claude does: env file sourced first.
-function session(f, cwd, extra = {}) {
+function session(f, cwd, extra = {}, install = true) {
   const file = path.join(f.dir, "claude-env.sh");
   fs.rmSync(file, { force: true });
-  const env = { ...f.env, CLAUDE_ENV_FILE: file, RYUGI_T3_WATCH_PLUGIN: require("../plugin.cjs"), ...extra };
+  const env = {
+    ...f.env,
+    CLAUDE_ENV_FILE: file,
+    XDG_DATA_HOME: path.join(f.dir, "data"),
+    RYUGI_T3_WATCH_PLUGIN: require("../plugin.cjs"),
+    ...extra,
+  };
   delete env.NODE_OPTIONS;
+  if (install) require("../entry.cjs").install(env);
   const r = spawnSync(process.execPath, [hook], {
     env,
     input: JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd }),
@@ -64,8 +71,9 @@ test("a Claude session in T3 loads the preload, so ryugi start subscribes like u
   assert.equal(plain.stderr, "");
 });
 
-test("outside T3 the hook writes nothing", (t) => {
+test("outside T3, or before `ryugi-t3-watch install`, the hook writes nothing", (t) => {
   const f = fixture(t);
-  const s = session(f, f.project, { T3CODE_THREAD_ID: "" });
-  assert.ok(!fs.existsSync(s.file));
+  assert.ok(!fs.existsSync(session(f, f.project, { T3CODE_THREAD_ID: "" }).file));
+  fs.rmSync(path.join(f.dir, "data"), { recursive: true });
+  assert.ok(!fs.existsSync(session(f, f.project, {}, false).file));
 });

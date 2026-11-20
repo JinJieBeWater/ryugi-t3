@@ -152,6 +152,8 @@ function doctor() {
   check("事件对照", parity);
   // Drift here only affects `selection-context` text, so it warns instead of pausing feedback.
   check("选区对照", selectionParity, true);
+  // Entry points only decide whether start auto-subscribes; forwarding works without them.
+  check("入口", () => require("./entry.cjs").entries(), true);
   check("内联摘要", () => {
     const { render } = require("./events.cjs");
     const text = render({

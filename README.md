@@ -4,14 +4,17 @@ T3 线程里的 agent 运行 `ryugi start --artifact artboard/layout` 后，这�
 
 agent 不需要任何说明，订阅在 agent 运行 Ryugi 的 `start` 时自动完成，规则在 [autosub.cjs](autosub.cjs)：只认 `ryugi.cjs`（或 `ryugi-artifacts.cjs`）的 `start`，按命令行里的 `--artifact` 和 `--project-dir` 订阅，再告诉 agent 选区要用 `selection-context` 读（Claude 线程里 Ryugi 自己的 hook 已经附上同一项目的选区，这句就省掉）。`--help`、不回传反馈的产物类型和 T3 外的 shell 都跳过。订阅失败（自检不通过、Codex 沙盒写不了状态目录）时告诉 agent 原因和手动 `subscribe` 的命令，start 本身照常成功。两条入口都只配在 `~/.t3/userdata/settings.json` 的 T3 provider 里：
 
-- Codex、Pi、Antigravity：`providerInstances.<id>.environment` 设 `NODE_OPTIONS=--require <本目录>/preload.cjs`。
+- Codex、Pi、Antigravity：`providerInstances.<id>.environment` 设 `NODE_OPTIONS=--require ~/.local/share/ryugi-t3-watch/preload.cjs`（写成绝对路径）。
 - Claude：Claude Code 会从 Bash 命令继承的环境里去掉 `NODE_OPTIONS`，所以改用启动参数 `--settings <本目录>/claude-settings.json` 挂一个 SessionStart hook，[claude-hook.cjs](claude-hook.cjs) 把同一句 `NODE_OPTIONS` 写进 `CLAUDE_ENV_FILE`（Claude 在每条 Bash 命令前 source 它），另外记下会话所在项目，那个项目的选区提示就省掉。
+
+`NODE_OPTIONS` 指向的不是本目录，而是 `ryugi-t3-watch install` 写到 `~/.local/share/ryugi-t3-watch/` 的一个壳文件（见 [entry.cjs](entry.cjs)）。它只尝试加载本目录的 preload，本目录被移走、删掉或改出语法错误时，node 照常运行，只是 start 不再自动订阅，并在那次 start 的 stderr 里说明。壳文件本身被删掉时 node 会启动失败，所以 `doctor` 会检查它和 T3 的几处配置。不能让壳把自己从 `NODE_OPTIONS` 里去掉：Codex、Pi、Antigravity 的宿主本身是 node 进程，去掉后它们的 shell 就拿不到了。
 
 两条入口之后都一样：线程 shell 里每个 node 进程先加载 [preload.cjs](preload.cjs)，它从 Ryugi 进程自己的 argv 读参数，在 start 成功退出后、或仍在运行满 3 秒时订阅，提示写在 stderr，Ryugi 的 stdout 不动。
 
 改 environment 或启动参数后，已启动的 Codex app-server 和已有会话要重启才会读到。某个工具自己重设 `NODE_OPTIONS` 时，那次 start 不会自动订阅，可以手动运行 `subscribe`。
 
 ```sh
+ryugi-t3-watch install
 ryugi-t3-watch subscribe --project "$PWD" --artifact artboard/layout [--thread THREAD]
 ryugi-t3-watch selection-context --cwd "$PWD"
 ryugi-t3-watch list
