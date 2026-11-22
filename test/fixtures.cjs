@@ -105,6 +105,19 @@ function fixture(t) {
     fs.existsSync(path.join(dir, "shows"))
       ? fs.readFileSync(path.join(dir, "shows"), "utf8").split("\n").filter((x) => x === String(n)).length
       : 0;
-  return { dir, project, root, state, label, launch, env, threads, run, json, sent, mock, shows };
+  // The worker's first look at a subscription is its baseline. Its heartbeat is written at the end
+  // of each pass, so the second one after this call ends a pass that began after it.
+  const alive = path.join(root, ".state/codex-comment-watch/ryugi-t3-watch.alive");
+  async function settled() {
+    const stamp = () => (fs.existsSync(alive) ? fs.readFileSync(alive, "utf8") : null);
+    let last = stamp(),
+      beats = 0;
+    await until(() => {
+      const now = stamp();
+      if (now !== null && now !== last) [last, beats] = [now, beats + 1];
+      return beats >= 2;
+    });
+  }
+  return { dir, project, root, state, label, launch, env, threads, run, json, sent, mock, shows, settled };
 }
 module.exports = { fixture, until, put, read, cli };

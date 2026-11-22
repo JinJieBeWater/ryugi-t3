@@ -16,7 +16,7 @@ const thread = (id, text, anchor = {}) => ({
 const submitAnswers = (f, artifact, id) =>
   put(path.join(f.root, ".state", artifact, "asks.json"), { latest: { id } });
 
-test("durable launchd watcher delivers changes since subscribe, survives restart and reconciles lost output", async (t) => {
+test("launchd worker delivers submits after its first look, survives restart and reconciles lost output", async (t) => {
   const f = fixture(t),
     a = "artboard/layout",
     d = "document/doc";
@@ -36,8 +36,9 @@ test("durable launchd watcher delivers changes since subscribe, survives restart
   comments(d, []);
   ask("historic", false);
   subscribe(a);
-  rounds("submitted"); // may happen before first worker tick
   subscribe(d);
+  await f.settled();
+  rounds("submitted");
   ask("answer", false);
   await until(() => f.sent().length === 2);
   assert.ok(f.sent().some((x) => /Ryugi choices.*submitted/.test(x.text)));
@@ -96,10 +97,13 @@ test("durable launchd watcher delivers changes since subscribe, survives restart
   assert.equal(count, 9);
   f.launch("remove", f.label);
   await until(() => f.launch("list", f.label).status !== 0);
+  // Detection state lives in the worker, so a restarted worker takes this submit as its baseline.
   submitAnswers(f, d, "while-stopped");
   fs.writeFileSync(path.join(f.dir, "lose"), "");
   subscribe(d);
-  await expectMessage(count + 1, /while-stopped/);
+  await f.settled();
+  submitAnswers(f, d, "after-restart");
+  await expectMessage(count + 1, /after-restart/);
   await until(() => status(d).pending.length === 0);
   assert.equal(f.sent().length, count + 1);
   f.threads[0].archived = true;
@@ -116,25 +120,29 @@ test("standing submit outlives stale open state, ownership transfer snapshots hi
   rounds("open");
   put(cf, { threads: [] });
   f.json("subscribe", "--artifact", a);
+  await f.settled();
   const record = thread("submit", "", { round: "r", submit: true });
   put(cf, { threads: [record] });
   rounds("submitted");
   await until(() => f.sent().length === 1);
   rounds("open");
-  await new Promise((r) => setTimeout(r, 3200));
+  await f.settled();
   rounds("submitted");
-  await new Promise((r) => setTimeout(r, 3200));
+  await f.settled();
   assert.equal(f.sent().length, 1);
   f.threads.push({ ...f.threads[0], threadId: "other" });
   put(path.join(f.dir, "threads"), f.threads);
   put(cf, { threads: [record, thread("prior", "prior owner")] });
   f.json("subscribe", "--thread", "other", "--artifact", a);
   // The standing submit belongs to the old owner's history and is not sent again.
-  await new Promise((r) => setTimeout(r, 3200));
+  await f.settled();
   assert.equal(f.sent().filter((x) => x.thread === "other").length, 0);
   const again = thread("submit2", "", { round: "r", submit: true });
   again.messages[0].at = "2026-01-02";
   put(cf, { threads: [record, thread("prior", "prior owner"), again] });
+  rounds("open");
+  await f.settled();
+  rounds("submitted");
   await until(() => f.sent().some((x) => x.thread === "other"));
   const newOwner = f.sent().filter((x) => x.thread === "other");
   assert.equal(newOwner.length, 1);
@@ -148,7 +156,9 @@ test("an unresolved receipt survives restart without blocking later independent 
     a = "document/deck";
   const sub = () => f.json("subscribe", "--artifact", a);
   const pending = () => f.json("status", "--artifact", a).pending;
+  put(path.join(f.root, a, "comments.json"), { threads: [] });
   sub();
+  await f.settled();
   fs.writeFileSync(path.join(f.dir, "drop"), "");
   submitAnswers(f, a, "first-event");
   await until(() => pending()[0]?.state === "uncertain");
@@ -162,6 +172,7 @@ test("an unresolved receipt survives restart without blocking later independent 
   put(dbFile, db);
   fs.unlinkSync(path.join(f.dir, "drop"));
   sub();
+  await f.settled();
   submitAnswers(f, a, "later-feedback");
   await until(() => f.sent().length === 1, 5500);
   assert.match(f.sent()[0].text, /later-feedback/);
@@ -172,7 +183,9 @@ test("an unresolved receipt survives restart without blocking later independent 
 test("a provable spawn failure backs off and a later retry sends once", async (t) => {
   const f = fixture(t),
     a = "document/shape";
+  put(path.join(f.root, a, "comments.json"), { threads: [] });
   f.json("subscribe", "--artifact", a);
+  await f.settled();
   fs.writeFileSync(path.join(f.dir, "uninstall-once"), "");
   submitAnswers(f, a, "deliver-once");
   await until(
@@ -253,9 +266,9 @@ test("a standing submission predating subscription stays silent when rounds.json
   const file = path.join(f.root, ".state", a, "rounds.json");
   put(file, { rounds: [] });
   f.json("subscribe", "--artifact", a);
+  await f.settled();
   put(file, { rounds: [{ id: "r", state: "submitted" }] });
-  await until(() => f.json("status", "--artifact", a).baseline.roundStates.r === "submitted");
-  await new Promise((r) => setTimeout(r, 400));
+  await f.settled();
   assert.equal(f.sent().length, 0);
 });
 test("worker publishes viewer listening heartbeat while subscribed and clears it on unsubscribe", async (t) => {
@@ -396,6 +409,8 @@ test("a submit brief renders outside the store lock and is sent inline, ahead of
   const f = fixture(t),
     a = "artboard/inline",
     started = path.join(f.dir, "render-started");
+  put(path.join(f.root, a, "comments.json"), { threads: [] });
+  put(path.join(f.root, ".state", a, "rounds.json"), { rounds: [{ id: "r2", state: "open" }] });
   f.json("subscribe", "--artifact", a);
   f.launch("remove", f.label);
   await until(() => f.launch("list", f.label).status !== 0);

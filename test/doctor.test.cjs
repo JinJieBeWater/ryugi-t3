@@ -38,7 +38,6 @@ test("doctor passes against the installed Ryugi plugin and names its version", (
   const version = JSON.parse(fs.readFileSync(path.join(plugin, "package.json"))).version;
   assert.match(r.stdout, new RegExp("Ryugi " + version.replaceAll(".", "\\.")));
   assert.doesNotMatch(r.stdout, /✖/);
-  assert.match(r.stdout, /✔ .*事件/);
   assert.match(r.stdout, /✔ 选区对照/);
 });
 
@@ -79,6 +78,7 @@ test("an upgrade that breaks the bridge pauses delivery with one notice and resu
   const ask = (id) => put(path.join(f.root, ".state", a, "asks.json"), { latest: { id } });
   put(file, { threads: [] });
   f.json("subscribe", "--artifact", a);
+  await f.settled();
   ask("before-upgrade");
   await until(() => f.sent().length === 1);
   const flag = (name, on) =>
@@ -94,6 +94,7 @@ test("an upgrade that breaks the bridge pauses delivery with one notice and resu
   await until(() => f.sent().length === 2, 15000);
   assert.match(f.sent()[1].text, /ryugi-t3-watch doctor/);
   assert.match(f.sent()[1].text, /wakeMessage/);
+  assert.match(f.sent()[1].text, /不会补发/);
   flag("lose", false);
   await until(() => f.json("list")[0].notice, 15000);
   assert.equal(f.sent().length, 2);
@@ -101,7 +102,9 @@ test("an upgrade that breaks the bridge pauses delivery with one notice and resu
   await new Promise((r) => setTimeout(r, 4000));
   assert.equal(f.sent().length, 2);
   copy.fix();
+  // The resumed worker starts from what the files show now; a submit made while paused is not sent.
+  await f.settled();
+  ask("after-fix");
   await until(() => f.sent().length === 3, 30000);
-  assert.match(f.sent()[2].text, /while-broken/);
-  assert.doesNotMatch(f.sent()[2].text, /before-upgrade/);
+  assert.match(f.sent()[2].text, /after-fix/);
 });

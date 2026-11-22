@@ -2,35 +2,36 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const { fixture, put } = require("./fixtures.cjs");
-const { scan, emptyBaseline, render } = require("../events.cjs");
+const { message, render } = require("../events.cjs");
 const { app } = require("../upstream.cjs");
 const { createCommentWatch, wakeMessage } = app("comment-watch");
 
-test("submit events carry the native watcher's list argv and render inlines the brief", (t) => {
+// Ryugi's own watcher: its first look is the baseline, later looks return what changed.
+function watcher(f, artifacts) {
+  const native = createCommentWatch(f.project, "pi"),
+    set = new Set(artifacts);
+  native(set);
+  return () => native(set);
+}
+
+test("a native submit becomes a message whose render inlines the brief", (t) => {
   const f = fixture(t),
     a = "artboard/pick",
     d = "document/ask";
   put(path.join(f.root, a, "comments.json"), { threads: [] });
   put(path.join(f.root, ".state", a, "rounds.json"), { rounds: [{ id: "r", state: "open" }] });
   put(path.join(f.root, d, "comments.json"), { threads: [] });
-  const native = createCommentWatch(f.project, "pi"),
-    set = new Set([a, d]);
-  const ba = emptyBaseline(),
-    bd = emptyBaseline();
-  native(set);
-  scan(f.project, a, "pi", ba, true);
-  scan(f.project, d, "pi", bd, true);
+  const poll = watcher(f, [a, d]);
   put(path.join(f.root, ".state", a, "rounds.json"), { rounds: [{ id: "r", state: "submitted" }] });
   put(path.join(f.root, ".state", d, "asks.json"), { latest: { id: "s1" } });
-  const expected = native(set);
-  const ours = [...scan(f.project, a, "pi", ba), ...scan(f.project, d, "pi", bd)];
-  assert.equal(ours.length, 2);
-  for (const item of ours) {
-    const twin = expected.find((e) => e.type === "ryugi-" + item.kind);
-    assert.deepEqual(item.render.argv, twin.argv);
-    assert.equal(item.text, wakeMessage(twin, 500));
+  const events = poll();
+  const ours = events.map((e) => message(e, {}, "pi"));
+  assert.deepEqual(ours.map((m) => m.kind).sort(), ["answers", "choices"]);
+  for (const [i, item] of ours.entries()) {
+    assert.deepEqual(item.render.argv, events[i].argv);
+    assert.equal(item.text, wakeMessage(events[i], 500));
   }
-  const choice = ours[0].render;
+  const choice = ours.find((m) => m.kind === "choices").render;
   const inline = render({ ...choice, argv: ["-e", "console.log('BRIEF one\\nBRIEF two')"] });
   assert.match(inline, /^Ryugi choices artboard\/pick round r submitted/);
   assert.match(inline, /\nBRIEF one\nBRIEF two$/);
@@ -39,34 +40,33 @@ test("submit events carry the native watcher's list argv and render inlines the 
   assert.match(render(choice), /Run: node /);
 });
 
-test("withdrawals are bounded and not rendered, and comments alone send nothing", (t) => {
+test("withdrawals are not rendered, and comments alone send nothing", (t) => {
   const f = fixture(t),
     a = "artboard/back";
   const rounds = (state) => put(path.join(f.root, ".state", a, "rounds.json"), { rounds: [{ id: "r", state }] });
   put(path.join(f.root, a, "comments.json"), { threads: [] });
   rounds("submitted");
-  const b = emptyBaseline();
-  scan(f.project, a, "pi", b, true);
+  const poll = watcher(f, [a]);
   rounds("open");
   put(path.join(f.root, a, "comments.json"), {
     threads: [{ id: "c", anchor: {}, status: "open", messages: [{ id: "m", author: "human", text: "x" }] }],
   });
-  const events = scan(f.project, a, "pi", b);
-  assert.deepEqual(events.map((e) => e.kind), ["choices"]);
-  assert.ok(events.every((e) => e.render === undefined));
+  const events = poll();
+  assert.deepEqual(events.map((e) => e.type).sort(), ["ryugi-choices", "ryugi-comments"]);
+  const ours = events.map((e) => message(e, {}, "pi")).filter(Boolean);
+  assert.deepEqual(ours.map((m) => m.kind), ["choices"]);
+  assert.equal(ours[0].render, undefined);
 });
 
 test("Run lines use the launcher and session proof the agent started with", (t) => {
-  const { scan, emptyBaseline } = require("../events.cjs");
   const f = fixture(t);
   const d = "document/bound";
   put(path.join(f.root, d, "comments.json"), { threads: [] });
-  const b = emptyBaseline();
-  scan(f.project, d, "Codex", b, true);
   put(path.join(f.root, ".state", d, "asks.json"), { latest: { id: "s", withdrawn: false } });
-  scan(f.project, d, "Codex", b);
+  const poll = watcher(f, [d]);
   put(path.join(f.root, ".state", d, "asks.json"), { latest: { id: "s", withdrawn: true } });
-  const [withdrawn] = scan(f.project, d, "Codex", b, false, { launcher: "/codex/app/ryugi.cjs", proof: "x:y" });
+  const [event] = poll();
+  const withdrawn = message(event, { launcher: "/codex/app/ryugi.cjs", proof: "x:y" }, "Codex");
   assert.match(withdrawn.text, /Run: node '\/codex\/app\/ryugi\.cjs' --ryugi-session x:y comment list/);
 });
 

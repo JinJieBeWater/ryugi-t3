@@ -39,46 +39,6 @@ const put = (file, value) => {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(value));
 };
-// Feeds one synthetic project to Ryugi's own watcher and to the bridge; their messages must match.
-function parity() {
-  const { createCommentWatch, wakeMessage } = require(path.join(appDir, "comment-watch.cjs"));
-  const { scan, emptyBaseline } = require("./events.cjs");
-  const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ryugi-t3-doctor-")));
-  try {
-    const root = path.join(project, ".ryugi/artifacts"),
-      a = "artboard/doctor",
-      d = "document/doctor";
-    const rounds = (state) =>
-      put(path.join(root, ".state", a, "rounds.json"), { rounds: [{ id: "r", state, groups: ["g"] }] });
-    put(path.join(root, a, "comments.json"), { threads: [] });
-    put(path.join(root, d, "comments.json"), { threads: [] });
-    rounds("open");
-    const native = createCommentWatch(project, "pi"),
-      set = new Set([a, d]),
-      ba = emptyBaseline(),
-      bd = emptyBaseline();
-    native(set);
-    scan(project, a, "pi", ba, true);
-    scan(project, d, "pi", bd, true);
-    rounds("submitted");
-    put(path.join(root, ".state", d, "asks.json"), { latest: { id: "s1" } });
-    const expected = native(set);
-    const ours = [...scan(project, a, "pi", ba), ...scan(project, d, "pi", bd)];
-    const kinds = ["choices", "answers"];
-    for (const kind of kinds) {
-      const theirs = expected.filter((e) => e.type === "ryugi-" + kind),
-        mine = ours.filter((e) => e.kind === kind);
-      if (theirs.length !== 1 || mine.length !== 1)
-        throw new Error(`${kind}：Ryugi ${theirs.length} 条，桥接 ${mine.length} 条`);
-      if (wakeMessage(theirs[0], 500) !== mine[0].text) throw new Error(kind + " 的提醒文本不同");
-      if (JSON.stringify(theirs[0].argv) !== JSON.stringify(mine[0].render?.argv))
-        throw new Error(kind + " 的内联命令参数不同");
-    }
-    return kinds.join("、") + " 与 Ryugi 原生 watcher 一致";
-  } finally {
-    fs.rmSync(project, { recursive: true, force: true });
-  }
-}
 // The selection formatters are private to Ryugi's prompt hook, so selection.cjs keeps a copy;
 // run the hook itself on one synthetic project and require the same text.
 function selectionParity() {
@@ -149,7 +109,6 @@ function doctor() {
     if (aliveFile("/p", "codex", "s") !== path.join(dir, "s.alive"))
       throw new Error("aliveFile 返回 " + aliveFile("/p", "codex", "s"));
   });
-  check("事件对照", parity);
   // Drift here only affects `selection-context` text, so it warns instead of pausing feedback.
   check("选区对照", selectionParity, true);
   // Entry points only decide whether start auto-subscribes; forwarding works without them.
@@ -178,10 +137,9 @@ const failures = (report) =>
     .filter((c) => !c.ok && !c.soft)
     .map((c) => c.name + "：" + c.detail)
     .join("；");
-// A worker on a failing plugin delivers nothing, so feedback waits in Ryugi's files with the baseline.
-// It tells each subscribed thread once, then restarts under launchd when the plugin changes again.
+// A worker on a failing plugin detects and delivers nothing. It tells each subscribed thread once, then restarts under launchd when the plugin changes again.
 async function paused(report, print) {
-  const notice = `ryugi-t3-watch 已暂停转发 Ryugi 反馈：Ryugi ${report.version || "?"} 未通过兼容自检（${failures(report)}）。请告诉用户运行 \`ryugi-t3-watch doctor\` 查看。修好或回退 Ryugi 后自动恢复，期间的反馈不会丢。`;
+  const notice = `ryugi-t3-watch 已暂停转发 Ryugi 反馈：Ryugi ${report.version || "?"} 未通过兼容自检（${failures(report)}）。请告诉用户运行 \`ryugi-t3-watch doctor\` 查看。修好或回退 Ryugi 后自动恢复；暂停期间的提交不会补发，恢复后需要用户重新提交。`;
   const key = print + "\n" + failures(report);
   const route = (r) => JSON.stringify([r.base, r.thread]);
   // Records the outcome on every subscription of that thread, so a thread gets one notice.

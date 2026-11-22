@@ -5,8 +5,9 @@ const { setTimeout: sleep } = require("node:timers/promises");
 const { randomUUID } = require("node:crypto");
 const { projectRoot, aliveFile, beat, subscriptionFile, app } = require("./upstream.cjs");
 const { postToServer } = app("agent-event");
+const { createCommentWatch } = app("comment-watch");
 const { atomic, stateRoot, locked, load, label, launch } = require("./store.cjs");
-const { scan, emptyBaseline, render } = require("./events.cjs");
+const { message, render } = require("./events.cjs");
 const { transport, call, show } = require("./t3.cjs");
 const { fingerprint } = require("./doctor.cjs");
 const watchId = "ryugi-t3-watch";
@@ -125,10 +126,8 @@ function subscribe(opts) {
     const now = Date.now();
     let r = find(db, key);
     if (!r || r.thread !== thread || r.base !== route.base || r.deadline <= now) {
-      const baseline = emptyBaseline();
-      scan(key.project, key.artifact, null, baseline, true);
       db.subscriptions = db.subscriptions.filter((other) => other !== r);
-      r = { ...key, thread, createdAt: now, baseline, pending: [], generation: randomUUID() };
+      r = { ...key, thread, createdAt: now, pending: [], generation: randomUUID() };
       db.subscriptions.push(r);
     }
     // The launcher the agent ran start with (and Codex's session proof) goes into Run lines it is shown.
@@ -241,15 +240,25 @@ async function worker(print) {
   let lastActive = Date.now();
   const cache = new Map(),
     statuses = new Map(),
-    trackedProjects = new Set();
+    trackedProjects = new Set(),
+    // Per subscription generation: Ryugi's watcher, whose first look is the baseline, and the
+    // events it returned that are not yet in the store.
+    watches = new Map(),
+    inbox = new Map();
   while (true) {
     if (fingerprint() !== print) process.exit(75);
     const snapshot = load().subscriptions;
     for (const entry of snapshot) trackedProjects.add(entry.project);
+    const live = new Set(snapshot.map((entry) => entry.generation));
+    for (const map of [watches, inbox]) for (const id of map.keys()) if (!live.has(id)) map.delete(id);
     for (const entry of snapshot) {
       const cacheKey = JSON.stringify([entry.base, entry.thread]);
       let cached = cache.get(cacheKey);
       try {
+        let poll = watches.get(entry.generation);
+        if (!poll) watches.set(entry.generation, (poll = createCommentWatch(entry.project)));
+        const found = poll(new Set([entry.artifact])).filter((e) => e.type !== "ryugi-comments");
+        if (found.length) inbox.set(entry.generation, [...(inbox.get(entry.generation) ?? []), ...found]);
         if (!cached || cached.until < Date.now()) {
           const thread = show(entry, 0).thread;
           // Each T3 CLI call costs ~0.25 s CPU, so an idle thread with nothing to send is checked slowly.
@@ -286,17 +295,12 @@ async function worker(print) {
             r.deadline = Date.now() + lease;
             renewed = true;
           }
-          const before = JSON.stringify(r.baseline);
           const host = keys[cached.thread.providerInstanceId] || "Codex";
-          // Only a click in the viewer (submit or withdraw) is sent; comments ride along with a submit.
-          const changes = scan(r.project, r.artifact, host, r.baseline, false, {
-            launcher: r.launcher,
-            proof: r.proof,
-          });
-          for (const event of changes)
-            r.pending.push({ ...event, id: randomUUID(), state: "ready" });
-          if (changes.length || JSON.stringify(r.baseline) !== before) lastActive = Date.now();
-          if (renewed || changes.length || JSON.stringify(r.baseline) !== before) save();
+          const changes = (inbox.get(r.generation) ?? []).map((event) => message(event, r, host)).filter(Boolean);
+          for (const item of changes) r.pending.push({ ...item, id: randomUUID(), state: "ready" });
+          if (changes.length) lastActive = Date.now();
+          if (renewed || changes.length) save();
+          inbox.delete(r.generation);
           deliver(r, db, save);
           return changes.length > 0;
         });
@@ -305,7 +309,7 @@ async function worker(print) {
         const latest = find(load(), entry);
         if (latest?.generation === entry.generation) renderPending(latest);
       } catch (e) {
-        // Re-read on the next pass. Keep the last good baseline after a partial file write.
+        // Retried on the next pass; detected events wait in the inbox.
         cache.delete(cacheKey);
       }
     }
