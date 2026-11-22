@@ -14,7 +14,7 @@ function session(f, cwd, extra = {}, install = true) {
     ...f.env,
     CLAUDE_ENV_FILE: file,
     XDG_DATA_HOME: path.join(f.dir, "data"),
-    RYUGI_T3_WATCH_PLUGIN: require("../upstream.cjs").plugin,
+    RYUGI_T3_PLUGIN: require("../upstream.cjs").plugin,
     ...extra,
   };
   delete env.NODE_OPTIONS;
@@ -71,7 +71,7 @@ test("a Claude session in T3 loads the preload, so ryugi start subscribes like u
   assert.equal(plain.stderr, "");
 });
 
-test("outside T3, or before `ryugi-t3-watch install`, the hook writes nothing", (t) => {
+test("outside T3, or before `ryugi-t3 install`, the hook writes nothing", (t) => {
   const f = fixture(t);
   assert.ok(!fs.existsSync(session(f, f.project, { T3CODE_THREAD_ID: "" }).file));
   fs.rmSync(path.join(f.dir, "data"), { recursive: true });

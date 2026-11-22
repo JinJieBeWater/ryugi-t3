@@ -275,8 +275,8 @@ test("worker publishes viewer listening heartbeat while subscribed and clears it
   const f = fixture(t),
     a = "artboard/live",
     dir = path.join(f.root, ".state/codex-comment-watch"),
-    sub = path.join(dir, "ryugi-t3-watch.json"),
-    alive = path.join(dir, "ryugi-t3-watch.alive");
+    sub = path.join(dir, "ryugi-t3.json"),
+    alive = path.join(dir, "ryugi-t3.alive");
   f.json("subscribe", "--artifact", a);
   await until(() => fs.existsSync(sub) && fs.existsSync(alive));
   assert.deepEqual(JSON.parse(fs.readFileSync(sub, "utf8")), { artifacts: [a] });
@@ -293,7 +293,7 @@ test("subscribe strips the artifact from every native host subscription and the 
   const native = (host, session) => path.join(state, host + "-comment-watch", session + ".json");
   const files = [native("claude", "c1"), native("pi", "p1"), native("codex", "x1")];
   for (const file of files) put(file, { artifacts: [a, other], updatedAt: "t" });
-  const ours = native("codex", "ryugi-t3-watch");
+  const ours = native("codex", "ryugi-t3");
   // A half-written Ryugi file and non-json siblings are left byte-identical.
   const partial = native("pi", "p2"),
     alive = path.join(state, "pi-comment-watch", "p1.alive");

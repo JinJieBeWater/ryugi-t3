@@ -28,7 +28,7 @@ test("a successful ryugi start in a T3 shell subscribes its artifact and says ho
   assert.equal(r.status, 0, r.stderr);
   // Ryugi's own stdout stays parseable JSON.
   assert.deepEqual(JSON.parse(r.stdout), { ok: true });
-  assert.match(r.stderr, /ryugi-t3-watch selection-context --cwd/);
+  assert.match(r.stderr, /ryugi-t3 selection-context --cwd/);
   const subs = f.json("list");
   assert.equal(subs.length, 1);
   assert.equal(subs[0].artifact, "artboard/layout");
@@ -91,7 +91,7 @@ test("a start that keeps running is subscribed before it exits", (t) => {
      }, 4500);`,
   );
   const r = start(f, slow, ["start", "--artifact", "artboard/live"], {
-    BRIDGE: path.join(__dirname, "..", "ryugi-t3-watch"),
+    BRIDGE: path.join(__dirname, "..", "ryugi-t3"),
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(JSON.parse(r.stdout)[0]?.artifact, "artboard/live");
@@ -102,10 +102,10 @@ test("a bridge that fails its self-check reports why on stderr without failing s
   const f = fixture(t);
   const ok = launcher(f, "ryugi.cjs", "");
   const r = start(f, ok, ["start", "--artifact", "artboard/layout"], {
-    RYUGI_T3_WATCH_PLUGIN: path.join(f.dir, "missing-plugin"),
+    RYUGI_T3_PLUGIN: path.join(f.dir, "missing-plugin"),
   });
   assert.equal(r.status, 0);
-  assert.match(r.stderr, /ryugi-t3-watch/);
+  assert.match(r.stderr, /ryugi-t3/);
   assert.match(r.stderr, /自检/);
   assert.deepEqual(f.json("list"), []);
 });

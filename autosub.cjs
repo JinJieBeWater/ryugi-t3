@@ -34,16 +34,16 @@ function subscribe({ artifact, project, proof }, cwd, { launcher, selection = tr
     encoding: "utf8",
     timeout: 30000,
   });
-  const manual = `ryugi-t3-watch subscribe --project ${JSON.stringify(project)} --artifact ${artifact}`;
+  const manual = `ryugi-t3 subscribe --project ${JSON.stringify(project)} --artifact ${artifact}`;
   if (r.status === 0)
     return (
-      `ryugi-t3-watch: 已订阅 ${artifact}，用户在查看器里点提交或撤回后会自动送回本线程，未读评论随提交一起送达。` +
+      `ryugi-t3: 已订阅 ${artifact}，用户在查看器里点提交或撤回后会自动送回本线程，未读评论随提交一起送达。` +
       (selection
-        ? `用户指代产物某处（如「这里」）却没说是哪时，先运行 ryugi-t3-watch selection-context --cwd ${JSON.stringify(project)}，无输出再问用户。`
+        ? `用户指代产物某处（如「这里」）却没说是哪时，先运行 ryugi-t3 selection-context --cwd ${JSON.stringify(project)}，无输出再问用户。`
         : "")
     );
   return (
-    `ryugi-t3-watch: 未能订阅 ${artifact}，提交到不了本线程。` +
+    `ryugi-t3: 未能订阅 ${artifact}，提交到不了本线程。` +
     (sandboxed ? `到沙盒外运行 ${manual}` : `运行 ${manual} 重试`) +
     "；仍失败就把下面的原因告诉用户：\n" +
     (r.stderr || String(r.error || "")).trim()

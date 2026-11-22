@@ -14,7 +14,7 @@ function pluginCopy(f) {
   fs.copyFileSync(path.join(plugin, "package.json"), path.join(copy, "package.json"));
   for (const part of ["skills/artifacts/app", "hooks"])
     fs.cpSync(path.join(plugin, part), path.join(copy, part), { recursive: true });
-  f.env.RYUGI_T3_WATCH_PLUGIN = copy;
+  f.env.RYUGI_T3_PLUGIN = copy;
   const watch = path.join(copy, "skills/artifacts/app/comment-watch.cjs");
   const original = fs.readFileSync(watch, "utf8");
   assert.ok(original.includes(exportsLine), "fixture expects Ryugi's comment-watch export line");
@@ -43,7 +43,7 @@ test("doctor passes against the installed Ryugi plugin and names its version", (
 test("doctor uses the managed Pi plugin by default even if a Gemini copy exists", (t) => {
   const f = fixture(t);
   f.env.HOME = f.dir;
-  delete f.env.RYUGI_T3_WATCH_PLUGIN;
+  delete f.env.RYUGI_T3_PLUGIN;
   put(path.join(f.dir, ".gemini/config/plugins/ryugi/package.json"), { version: "1.0.0" });
   const managed = path.join(f.dir, ".local/share/ryugi/install/plugins/pi/plugin");
   put(path.join(managed, "package.json"), { version: "2.0.0" });
@@ -98,7 +98,7 @@ test("an upgrade that breaks the bridge pauses delivery with one notice and resu
   flag("drop", false);
   flag("lose", true);
   await until(() => f.sent().length === 2, 15000);
-  assert.match(f.sent()[1].text, /ryugi-t3-watch doctor/);
+  assert.match(f.sent()[1].text, /ryugi-t3 doctor/);
   assert.match(f.sent()[1].text, /wakeMessage/);
   assert.match(f.sent()[1].text, /不会补发/);
   flag("lose", false);

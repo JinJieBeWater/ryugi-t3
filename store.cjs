@@ -6,10 +6,10 @@ const { spawnSync } = require("node:child_process");
 
 const stateRoot = path.resolve(
   process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local/state"),
-  "ryugi-t3-watch",
+  "ryugi-t3",
 );
 const label =
-  "local.ryugi-t3.watcher." + createHash("sha256").update(stateRoot).digest("hex").slice(0, 12);
+  "local.ryugi-t3.worker." + createHash("sha256").update(stateRoot).digest("hex").slice(0, 12);
 const file = path.join(stateRoot, "subscriptions.json");
 function atomic(file, value) {
   const tmp = file + "." + randomUUID() + ".tmp";

@@ -7,18 +7,18 @@ const path = require("node:path");
 const preload = path.join(__dirname, "preload.cjs");
 
 const stubPath = (env = process.env) =>
-  path.join(env.XDG_DATA_HOME || path.join(os.homedir(), ".local/share"), "ryugi-t3-watch/preload.cjs");
+  path.join(env.XDG_DATA_HOME || path.join(os.homedir(), ".local/share"), "ryugi-t3/preload.cjs");
 // The NODE_OPTIONS value for T3's provider settings; Node reads double-quoted paths with spaces.
 const nodeOptions = (env = process.env) => "--require " + JSON.stringify(stubPath(env));
 
 function stubSource(target) {
-  return `// Written by \`ryugi-t3-watch install\`; see entry.cjs there. Safe to leave behind: it only loads the
+  return `// Written by \`ryugi-t3 install\`; see entry.cjs there. Safe to leave behind: it only loads the
 // bridge's preload while that exists, and says so only when a Ryugi start could not auto-subscribe.
 try {
   require(${JSON.stringify(target)});
 } catch (e) {
   if (/(?:^|[\\\\/])ryugi(?:-artifacts)?\\.cjs$/.test(process.argv[1] || "") && process.env.T3CODE_THREAD_ID)
-    process.stderr.write("ryugi-t3-watch: 预加载失败，没有自动订阅（" + e.message.split("\\n")[0] + "）。运行 ryugi-t3-watch doctor 查看。\\n");
+    process.stderr.write("ryugi-t3: 预加载失败，没有自动订阅（" + e.message.split("\\n")[0] + "）。运行 ryugi-t3 doctor 查看。\\n");
 }
 `;
 }

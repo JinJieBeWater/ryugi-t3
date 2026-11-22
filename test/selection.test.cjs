@@ -71,7 +71,7 @@ test("selection-context is the installed hook's own output, run as a plain shell
     threads: [{ id: "x", status: "open", anchor: {}, messages: [{ id: "m", at: "2026-01-01", author: "human", text: "unread" }] }],
   });
   const text = f.run(["selection-context", "--cwd", f.project], undefined, {
-    RYUGI_T3_WATCH_PLUGIN: copy,
+    RYUGI_T3_PLUGIN: copy,
     // An Antigravity agent shell: the hook would answer in JSON and start Antigravity's own watcher.
     ANTIGRAVITY_AGENT: "1",
     ANTIGRAVITY_LS_ADDRESS: "127.0.0.1:1",

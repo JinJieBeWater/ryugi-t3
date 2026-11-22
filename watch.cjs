@@ -15,7 +15,7 @@ const { atomic, stateRoot, locked, load, label, launch } = require("./store.cjs"
 const { message, render } = require("./events.cjs");
 const { transport, call, show } = require("./t3.cjs");
 const { fingerprint } = require("./doctor.cjs");
-const watchId = "ryugi-t3-watch";
+const watchId = "ryugi-t3";
 const idlePoll = 20000;
 const artifactPattern = /^(?:document|artboard|whiteboard|slides)\/[a-z0-9][a-z0-9-]*$/;
 const keys = {
@@ -92,8 +92,8 @@ function ensureJob() {
     "HOME=" + os.homedir(),
     "PATH=" + (process.env.PATH || ""),
     "XDG_STATE_HOME=" + path.dirname(stateRoot),
-    ...(process.env.RYUGI_T3_WATCH_PLUGIN
-      ? ["RYUGI_T3_WATCH_PLUGIN=" + process.env.RYUGI_T3_WATCH_PLUGIN]
+    ...(process.env.RYUGI_T3_PLUGIN
+      ? ["RYUGI_T3_PLUGIN=" + process.env.RYUGI_T3_PLUGIN]
       : []),
     process.execPath,
     path.join(__dirname, "cli.cjs"),
@@ -122,7 +122,7 @@ function subscribe(opts) {
   const thread = opts.thread || process.env.T3CODE_THREAD_ID;
   if (!thread)
     throw new Error(
-      "这个 shell 里没有 T3 线程 ID。在 T3 线程里（例如 Grok）时，先调用 T3 工具 orchestrator_capabilities，用返回的 parentThreadId 重试：ryugi-t3-watch subscribe --thread <parentThreadId> --artifact " +
+      "这个 shell 里没有 T3 线程 ID。在 T3 线程里（例如 Grok）时，先调用 T3 工具 orchestrator_capabilities，用返回的 parentThreadId 重试：ryugi-t3 subscribe --thread <parentThreadId> --artifact " +
         key.artifact,
     );
   const ttl = Number(opts.ttl ?? 7 * 86400);

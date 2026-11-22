@@ -3,5 +3,5 @@ entry=$(/usr/bin/readlink -f "$0") || exit 1
 for node in "$(command -v node)" /opt/homebrew/bin/node "$HOME/.local/share/mise/shims/node" "$HOME/.vite-plus/bin/node"; do
   [ -x "$node" ] && exec "$node" "${entry%/*}/cli.cjs" "$@"
 done
-echo 'ryugi-t3-watch requires Node.js 22+' >&2
+echo 'ryugi-t3 requires Node.js 22+' >&2
 exit 127

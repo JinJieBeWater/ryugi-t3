@@ -102,7 +102,7 @@ const failures = (report) =>
     .join("；");
 // A worker on a failing plugin detects and delivers nothing. It tells each subscribed thread once, then restarts under launchd when the plugin changes again.
 async function paused(report, print) {
-  const notice = `ryugi-t3-watch 已暂停转发 Ryugi 反馈：Ryugi ${report.version || "?"} 未通过兼容自检（${failures(report)}）。请告诉用户运行 \`ryugi-t3-watch doctor\` 查看。修好或回退 Ryugi 后自动恢复；暂停期间的提交不会补发，恢复后需要用户重新提交。`;
+  const notice = `ryugi-t3 已暂停转发 Ryugi 反馈：Ryugi ${report.version || "?"} 未通过兼容自检（${failures(report)}）。请告诉用户运行 \`ryugi-t3 doctor\` 查看。修好或回退 Ryugi 后自动恢复；暂停期间的提交不会补发，恢复后需要用户重新提交。`;
   const key = print + "\n" + failures(report);
   const route = (r) => JSON.stringify([r.base, r.thread]);
   // Records the outcome on every subscription of that thread, so a thread gets one notice.

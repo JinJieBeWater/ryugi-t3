@@ -4,7 +4,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { createHash } = require("node:crypto");
 const assert = require("node:assert/strict");
-const cli = path.join(__dirname, "..", "ryugi-t3-watch");
+const cli = path.join(__dirname, "..", "ryugi-t3");
 function put(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file + ".new", JSON.stringify(value));
@@ -23,10 +23,10 @@ function fixture(t) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ryugi-t3-test-")));
   const project = path.join(dir, "project");
   const root = path.join(project, ".ryugi/artifacts");
-  const state = path.join(dir, "state/ryugi-t3-watch");
+  const state = path.join(dir, "state/ryugi-t3");
   fs.mkdirSync(root, { recursive: true });
   const label =
-    "local.ryugi-t3.watcher." + createHash("sha256").update(state).digest("hex").slice(0, 12);
+    "local.ryugi-t3.worker." + createHash("sha256").update(state).digest("hex").slice(0, 12);
   const launch = (...args) => spawnSync("/bin/launchctl", args, { encoding: "utf8" });
   t.after(() => {
     launch("remove", label);
@@ -107,7 +107,7 @@ function fixture(t) {
       : 0;
   // The worker's first look at a subscription is its baseline. Its heartbeat is written at the end
   // of each pass, so the second one after this call ends a pass that began after it.
-  const alive = path.join(root, ".state/codex-comment-watch/ryugi-t3-watch.alive");
+  const alive = path.join(root, ".state/codex-comment-watch/ryugi-t3.alive");
   async function settled() {
     const stamp = () => (fs.existsSync(alive) ? fs.readFileSync(alive, "utf8") : null);
     let last = stamp(),

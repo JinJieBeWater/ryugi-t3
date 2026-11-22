@@ -4,7 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 // This stable plugin path is refreshed by `ryugi update`.
 const plugin = path.resolve(
-  process.env.RYUGI_T3_WATCH_PLUGIN || path.join(os.homedir(), ".local/share/ryugi/install/plugins/pi/plugin"),
+  process.env.RYUGI_T3_PLUGIN || path.join(os.homedir(), ".local/share/ryugi/install/plugins/pi/plugin"),
 );
 const launcher = path.join(plugin, "skills/artifacts/app/ryugi.cjs");
 const hook = path.join(plugin, "hooks/selection-context.cjs");

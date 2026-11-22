@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /Users/jinjiebewater/my/tools/ryugi-t3-watch/claude-hook.cjs",
+            "command": "node /Users/jinjiebewater/my/tools/ryugi-t3/claude-hook.cjs",
             "timeout": 10
           }
         ]
