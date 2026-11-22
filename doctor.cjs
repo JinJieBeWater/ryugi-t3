@@ -1,7 +1,6 @@
 // Checks that the installed Ryugi plugin still offers what the bridge borrows from it.
 // Loads nothing eagerly so a broken plugin is reported, not thrown.
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { setTimeout: sleep } = require("node:timers/promises");
 const { locked, label, launch } = require("./store.cjs");
@@ -35,49 +34,6 @@ function fingerprint() {
     })
     .join("|");
 }
-const put = (file, value) => {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(value));
-};
-// The selection formatters are private to Ryugi's prompt hook, so selection.cjs keeps a copy;
-// run the hook itself on one synthetic project and require the same text.
-function selectionParity() {
-  const { spawnSync } = require("node:child_process");
-  const { selectionContext } = require("./selection.cjs");
-  const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ryugi-t3-doctor-")));
-  try {
-    const state = path.join(project, ".ryugi/artifacts/.state");
-    put(path.join(state, "server-info"), {});
-    const node = { id: "board#7", board: "board", tag: "button", file: "x.html", path: "main > button", tweaks: [] };
-    put(path.join(state, "artboard/doctor/selection.json"), {
-      artifact: "artboard/doctor",
-      updatedAt: "2026-01-01",
-      selected: [node],
-      nodes: [node],
-      tweaks: [{ ...node, property: "color", from: "red", value: "blue" }],
-    });
-    fs.mkdirSync(path.join(project, ".ryugi/artifacts/document/doctor"), { recursive: true });
-    put(path.join(state, "document/doctor/selection.json"), { quote: "selected quote", blockIds: ["b"] });
-    put(path.join(state, "whiteboard/doctor/selection.json"), {
-      selected: [{ id: "shape", type: "rect", text: "rectangle" }],
-    });
-    const env = { PATH: process.env.PATH, HOME: project, XDG_CONFIG_HOME: path.join(project, "config") };
-    const native = spawnSync(process.execPath, [path.join(plugin, "hooks/selection-context.cjs"), project, project], {
-      cwd: project,
-      env,
-      input: "{}",
-      encoding: "utf8",
-      timeout: 10000,
-    });
-    if (native.status !== 0) throw new Error("Ryugi 的 selection-context 退出码 " + native.status);
-    const ours = selectionContext({ cwd: project });
-    if (!ours) throw new Error("桥接没有输出选区");
-    if (native.stdout.trimEnd() !== ours) throw new Error("选区文本与 Ryugi 的 prompt hook 不同");
-    return "artboard、document、whiteboard 选区与 Ryugi 的 prompt hook 一致";
-  } finally {
-    fs.rmSync(project, { recursive: true, force: true });
-  }
-}
 function doctor() {
   const checks = [];
   // A soft check only warns: it does not pause forwarding.
@@ -109,8 +65,6 @@ function doctor() {
     if (aliveFile("/p", "codex", "s") !== path.join(dir, "s.alive"))
       throw new Error("aliveFile 返回 " + aliveFile("/p", "codex", "s"));
   });
-  // Drift here only affects `selection-context` text, so it warns instead of pausing feedback.
-  check("选区对照", selectionParity, true);
   // Entry points only decide whether start auto-subscribes; forwarding works without them.
   check("入口", () => require("./entry.cjs").entries(), true);
   check("内联摘要", () => {

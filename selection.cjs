@@ -1,191 +1,31 @@
-// Ryugi's prompt hook (hooks/selection-context.cjs) exports only its reminder functions, so its
-// selection formatters are copied here. `doctor` runs the hook on a synthetic project and fails
-// if the text differs; when it does, copy the formatters again.
-const fs = require("node:fs");
+// The viewer's selections, as Ryugi's own prompt hook prints them. It runs as a plain shell would:
+// agent markers would make it answer in Antigravity's JSON or start Antigravity's own watcher.
+const { spawnSync } = require("node:child_process");
 const path = require("node:path");
-const { projectRoot } = require("./upstream.cjs");
-const MAX_CONTEXT = 8000;
-const MAX_HTML = 600;
-
-function readJson(file) {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return null;
+const { projectRoot, hook } = require("./upstream.cjs");
+const markers = /^(?:ANTIGRAVITY_|CLAUDE_|CURSOR_|PLUGIN_)|^NODE_OPTIONS$/;
+function selectionContext({ cwd }) {
+  const project = projectRoot(path.resolve(cwd || process.cwd()));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !markers.test(k)));
+  const r = spawnSync(process.execPath, [hook, project, project], {
+    cwd: project,
+    env,
+    input: "{}",
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  if (r.status !== 0) throw new Error(`Ryugi 的 selection-context 失败（${r.status ?? r.error}）：${r.stderr.trim()}`);
+  // The hook's unread-comment reminder counts for the wrong host; T3 threads get unread comments with each submit.
+  // It is pure, unlike the auto-publish notices that follow it, which are one-shot and pass through.
+  const { commentReminders, cursorKey } = require(hook);
+  const reminder = commentReminders(project, path.join(project, ".ryugi/artifacts"), cursorKey(env));
+  let text = r.stdout.trimEnd();
+  for (const cut of reminder ? ["\n\n" + reminder, reminder + "\n\n", reminder] : []) {
+    const at = text.lastIndexOf(cut);
+    if (at < 0) continue;
+    text = text.slice(0, at) + text.slice(at + cut.length);
+    break;
   }
-}
-
-function selectionFiles(state) {
-  const files = [];
-  let types;
-  try {
-    types = fs.readdirSync(state);
-  } catch {
-    return files;
-  }
-  for (const type of types) {
-    let ids;
-    try {
-      ids = fs.readdirSync(path.join(state, type));
-    } catch {
-      continue;
-    }
-    for (const id of ids) {
-      const file = path.join(state, type, id, "selection.json");
-      const value = readJson(file);
-      if (
-        value &&
-        Array.isArray(value.selected) &&
-        Array.isArray(value.tweaks) &&
-        Array.isArray(value.nodes)
-      )
-        files.push({ file, value });
-    }
-  }
-  return files;
-}
-
-const where = (node) => `${node.id} <${node.tag}> in ${node.file} at \`${node.path}\``;
-const change = (item) => `${item.property}: ${item.from} → ${item.value}`;
-const clip = (text, max) => (text.length > max ? `${text.slice(0, max)}…` : text);
-
-const escapeRegExp = (text) => text.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-function typedNodes(nodes, prompt) {
-  const boards = [...new Set(nodes.map((node) => node.board))];
-  const typed = new Set();
-  for (const board of boards) {
-    for (const match of prompt.matchAll(
-      new RegExp(`(?<![A-Za-z0-9_-])${escapeRegExp(board)}#(\\d+)(?!\\d)`, "g"),
-    ))
-      typed.add(`${board}#${match[1]}`);
-  }
-  return nodes.filter((node) => typed.has(node.id));
-}
-
-function describe(session, { file, value }, prompt, budget) {
-  const named = typedNodes(value.nodes, prompt);
-  if (!value.selected.length && !value.tweaks.length && !named.length) return "";
-  const head = [`Artboard ${value.artifact}, open in the viewer (updated ${value.updatedAt}):`];
-  if (named.length) {
-    head.push("Nodes named in this message:");
-    for (const node of named) head.push(`- ${where(node)}${node.name ? ` "${node.name}"` : ""}`);
-  }
-  const tail = `Full selection and node map: ${path.relative(session, file)}`;
-  const body = [];
-  if (value.selected.length) {
-    const html = Math.max(80, Math.min(MAX_HTML, Math.floor(budget / 2 / value.selected.length)));
-    body.push("Selected nodes:");
-    for (const node of value.selected) {
-      body.push(`- ${where(node)}${node.text ? ` "${clip(node.text, 120)}"` : ""}`);
-      if (node.html) body.push(`  html: ${clip(node.html, html)}`);
-      if (node.tweaks.length) body.push(`  preview tweaks: ${node.tweaks.map(change).join("; ")}`);
-    }
-    if (value.more) body.push(`(${value.more} more selected, listed in the file below)`);
-  }
-  if (value.tweaks.length) {
-    body.push("Preview tweaks on other nodes (not in the source yet):");
-    for (const tweak of value.tweaks) body.push(`- ${where(tweak)}: ${change(tweak)}`);
-  }
-  const fixed = head.join("\n").length + tail.length + 2;
-  const room = Math.max(0, budget - fixed);
-  const middle = body.join("\n");
-  const kept =
-    middle.length > room
-      ? `${middle.slice(0, Math.max(0, room - 40))}\n(more in the file below)`
-      : middle;
-  return [head.join("\n"), kept, tail].filter(Boolean).join("\n");
-}
-
-function documentIds(root) {
-  try {
-    return fs.readdirSync(path.join(root, "document")).sort();
-  } catch {
-    return [];
-  }
-}
-
-function artifactIds(root, type) {
-  try {
-    return fs.readdirSync(path.join(root, type)).sort();
-  } catch {
-    return [];
-  }
-}
-
-function documentSelections(session, root, budget) {
-  const sections = [];
-  let left = budget;
-  for (const id of documentIds(root)) {
-    const file = path.join(root, ".state", "document", id, "selection.json");
-    const value = readJson(file);
-    if (!value || typeof value.quote !== "string" || !value.quote || !Array.isArray(value.blockIds))
-      continue;
-    const blocks = value.blockIds.length
-      ? `${value.heading ? "," : " in"} blocks ${value.blockIds.join(", ")}`
-      : "";
-    const where = `${value.heading ? ` under "${value.heading}"` : ""}${blocks}`;
-    const head = `Document document/${id}, open in the viewer (updated ${value.updatedAt}):\nSelected${where}:`;
-    const tail = `Full selection: ${path.relative(session, file)}`;
-    const room = left - head.length - tail.length - 4;
-    if (room < 40) break;
-    const quote = clip(value.quote, room)
-      .split("\n")
-      .map((line) => `> ${line}`)
-      .join("\n");
-    const section = [head, quote, tail].join("\n");
-    sections.push(section);
-    left -= section.length + 2;
-  }
-  return sections;
-}
-
-const element = (item) =>
-  `- ${item.id} ${item.type}${item.text ? ` "${clip(item.text, 120)}"` : ""}${item.frameId ? ` in frame ${item.frameId}` : ""}${item.author ? ` · ${item.author}` : ""}`;
-
-function whiteboardSelections(session, root, budget) {
-  const sections = [];
-  let left = budget;
-  for (const id of artifactIds(path.join(root, ".state"), "whiteboard")) {
-    const file = path.join(root, ".state", "whiteboard", id, "selection.json");
-    const value = readJson(file);
-    if (!value || !Array.isArray(value.selected) || !value.selected.length) continue;
-    const head = `Whiteboard whiteboard/${id}, open in the viewer (updated ${value.updatedAt}):\nSelected elements:`;
-    const tail = `Full selection: ${path.relative(session, file)}`;
-    const room = left - head.length - tail.length - 4;
-    if (room < 40) break;
-    const section = [head, clip(value.selected.map(element).join("\n"), room), tail].join("\n");
-    sections.push(section);
-    left -= section.length + 2;
-  }
-  return sections;
-}
-
-// Selections only: unread comments now reach the agent with a submit, or when the user mentions them.
-function selectionContext(opts) {
-  let session = opts.cwd || process.cwd();
-  try {
-    session = fs.realpathSync(session);
-  } catch {}
-  const root = path.join(projectRoot(session), ".ryugi/artifacts");
-  const state = path.join(root, ".state");
-  if (!fs.existsSync(path.join(state, "server-info"))) return "";
-  const files = selectionFiles(state).sort((a, b) =>
-    String(b.value.updatedAt).localeCompare(String(a.value.updatedAt)),
-  );
-  const sections = [];
-  let left = MAX_CONTEXT;
-  for (const entry of files) {
-    if (left <= 0) break;
-    const section = describe(session, entry, "", left);
-    if (!section) continue;
-    sections.push(section);
-    left -= section.length + 2;
-  }
-  const documents = documentSelections(session, root, left);
-  sections.push(...documents);
-  for (const section of documents) left -= section.length + 2;
-  sections.push(...whiteboardSelections(session, root, left));
-  return sections.join("\n\n");
+  return text;
 }
 module.exports = { selectionContext };

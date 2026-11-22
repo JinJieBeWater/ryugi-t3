@@ -38,7 +38,6 @@ test("doctor passes against the installed Ryugi plugin and names its version", (
   const version = JSON.parse(fs.readFileSync(path.join(plugin, "package.json"))).version;
   assert.match(r.stdout, new RegExp("Ryugi " + version.replaceAll(".", "\\.")));
   assert.doesNotMatch(r.stdout, /✖/);
-  assert.match(r.stdout, /✔ 选区对照/);
 });
 
 test("doctor uses the managed Pi plugin by default even if a Gemini copy exists", (t) => {
