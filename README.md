@@ -33,4 +33,4 @@ ryugi-t3 doctor
 
 检测状态只在 worker 内存里：worker 第一次看到一个订阅时，产物当时的状态就是基线。所以 worker 停着的时候（Ryugi 升级后重启的几秒、自检暂停期间、重启机器后到下一次订阅之前）发生的提交不会补发，Ryugi 自己的原生 watcher 也一样。续订只延期（默认七天，`--ttl` 单位秒）。macOS 的单个按需 launchd 作业按状态目录隔离，空表后退出。状态保存在 `${XDG_STATE_HOME:-~/.local/state}/ryugi-t3`。投递回执不明时核对最近 50 条消息，保留未确认记录供 `status` 查看。
 
-运行需要 Node.js 22+、本机 T3 CLI 和 `ryugi install` 安装的 Pi 集成，没有 npm 依赖。桥接默认使用 Ryugi 托管的 `~/.local/share/ryugi/install/plugins/pi/plugin`，不要求 T3 线程使用 Pi，也不固定版本。用 `ryugi update` 更新插件，不要加 `--cli-only`。非默认安装目录或开发检出可用 `RYUGI_T3_PLUGIN` 指定插件目录。运行 `npm test` 验证桥接，真实 launchd 测试使用临时状态目录。`selection-context` 输出 Ryugi prompt hook 的选区部分，去掉它附带的未读评论提醒（未读评论随提交送达）。
+运行需要 Node.js 22+、本机 T3 CLI 和 `ryugi install` 安装的 Pi 集成，没有 npm 依赖。桥接默认使用 Ryugi 托管的 `~/.local/share/ryugi/install/plugins/pi/plugin`，不要求 T3 线程使用 Pi，也不固定版本。用 `ryugi update` 更新插件，不要加 `--cli-only`。非默认安装目录或开发检出可用 `RYUGI_T3_PLUGIN` 指定插件目录。运行 `npm test` 验证桥接，真实 launchd 测试使用临时状态目录。`selection-context` 输出 Ryugi prompt hook 的结果，去掉其中的未读评论提醒（未读评论随提交送达），Ryugi 的 auto-publish 提示保留。

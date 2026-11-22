@@ -1,5 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const path = require("node:path");
 const { fixture, put } = require("./fixtures.cjs");
 const { message, render } = require("../events.cjs");
@@ -69,10 +70,11 @@ test("Run lines use the launcher and session proof the agent started with", (t) 
   assert.match(withdrawn.text, /Run: node '\/codex\/app\/ryugi\.cjs' --ryugi-session x:y comment list/);
 });
 
-test("an event without Ryugi's list argv still becomes a message with its Run line", () => {
-  const event = { type: "ryugi-answers", artifact: "document/d", submit: "s", questions: 1, command: "node x comment list" };
-  const item = message(event, { project: "/p", launcher: "/a/ryugi.cjs" }, "Codex");
-  assert.match(item.text, /Ryugi answers document\/d submitted.*Run: node x comment list/);
+test("an event without Ryugi's list argv still becomes a message whose Run line names the agent's launcher", () => {
+  const ryugi = fs.realpathSync(require("../upstream.cjs").launcher);
+  const event = { type: "ryugi-answers", artifact: "document/d", submit: "s", questions: 1, command: `node '${ryugi}' comment list` };
+  const item = message(event, { project: "/p", launcher: "/a/ryugi.cjs", proof: "x:y" }, "Codex");
+  assert.match(item.text, /Ryugi answers document\/d submitted.*Run: node '\/a\/ryugi\.cjs' --ryugi-session x:y comment list/);
   assert.equal(item.render, undefined);
 });
 

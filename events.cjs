@@ -1,4 +1,6 @@
-const { unreadCount, wakeMessage } = require("./upstream.cjs");
+const fs = require("node:fs");
+const upstream = require("./upstream.cjs");
+const { unreadCount, wakeMessage } = upstream;
 
 const quote = (s) => "'" + s.replaceAll("'", "'\"'\"'") + "'";
 // The worker runs outside any agent, so Ryugi's CLI is told whose unread comments to list
@@ -34,8 +36,13 @@ function message(event, record, host) {
   if (!kind) return null;
   // Without Ryugi's list argv there is no brief to inline; the Run line still works.
   const launcher = event.argv?.[0];
-  const rebind = launcher && record.launcher && {
-    from: launcher,
+  // Ryugi names its launcher by real path.
+  let ryugi = launcher ?? upstream.launcher;
+  try {
+    ryugi = fs.realpathSync(ryugi);
+  } catch {}
+  const rebind = record.launcher && {
+    from: ryugi,
     to: quote(record.launcher) + (record.proof ? " --ryugi-session " + record.proof : ""),
   };
   const text = rebound(wakeMessage(event, 500), rebind);

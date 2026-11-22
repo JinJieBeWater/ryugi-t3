@@ -17,7 +17,8 @@ function version() {
 }
 // Changes whenever an upgrade replaces any file the bridge loads.
 function fingerprint() {
-  const files = ["package.json", path.relative(plugin, launcher), ...Object.keys(contract)];
+  // comment-threads is loaded by comment-watch and the hook, so a change to it changes their behavior too.
+  const files = ["package.json", path.relative(plugin, launcher), "skills/artifacts/app/comment-threads.cjs", ...Object.keys(contract)];
   return files
     .map((f) => {
       try {
