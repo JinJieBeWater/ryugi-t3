@@ -7,7 +7,7 @@ const { setTimeout: sleep } = require("node:timers/promises");
 const { locked, label, launch } = require("./store.cjs");
 const { call, show } = require("./t3.cjs");
 const upstream = require("./upstream.cjs");
-const { plugin, launcher, contract, load } = upstream;
+const { plugin, launcher, contract, reminderHelpers, load } = upstream;
 function version() {
   try {
     return JSON.parse(fs.readFileSync(path.join(plugin, "package.json"), "utf8")).version || null;
@@ -66,6 +66,44 @@ function doctor() {
       fs.rmSync(project, { recursive: true, force: true });
     }
   });
+  // Ryugi's watcher must still report a submit and an answer as events the bridge forwards with a brief.
+  check("事件", () => {
+    const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ryugi-t3-doctor-")));
+    const put = (file, value) => {
+      fs.mkdirSync(path.dirname(path.join(project, file)), { recursive: true });
+      fs.writeFileSync(path.join(project, file), JSON.stringify(value));
+    };
+    try {
+      const a = "artboard/doctor",
+        d = "document/doctor",
+        rounds = (state) => put(`.ryugi/artifacts/.state/${a}/rounds.json`, { rounds: [{ id: "r", state }] });
+      for (const id of [a, d]) put(`.ryugi/artifacts/${id}/comments.json`, { threads: [] });
+      rounds("open");
+      const poll = upstream.createCommentWatch(project),
+        set = new Set([a, d]);
+      poll(set);
+      rounds("submitted");
+      put(`.ryugi/artifacts/.state/${d}/asks.json`, { latest: { id: "s" } });
+      const { message } = require("./events.cjs");
+      const kinds = poll(set)
+        .map((e) => message(e, { project }, "pi"))
+        .filter((m) => m?.render)
+        .map((m) => m.kind);
+      const missing = ["choices", "answers"].filter((k) => kinds.filter((x) => x === k).length !== 1);
+      if (missing.length) throw new Error(`提交后没有可转发的 ${missing.join("、")} 事件`);
+    } finally {
+      fs.rmSync(project, { recursive: true, force: true });
+    }
+  });
+  check(
+    "选区提醒",
+    () => {
+      const exported = load("hooks/selection-context.cjs");
+      const missing = reminderHelpers.filter((n) => typeof exported[n] !== "function");
+      if (missing.length) throw new Error(`缺少 ${missing.join("、")}，selection-context 会带上未读评论提醒`);
+    },
+    true,
+  );
   check("订阅文件路径", () => {
     const { subscriptionFile, aliveFile } = upstream;
     const dir = path.join("/p", ".ryugi/artifacts/.state/codex-comment-watch");

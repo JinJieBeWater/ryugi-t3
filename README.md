@@ -25,7 +25,7 @@ ryugi-t3 doctor
 
 桥接不复制 Ryugi 的逻辑：提交和撤回由 Ryugi 导出的 `createCommentWatch` 检测，提醒文本由它的 `wakeMessage` 生成，选区由它的 prompt hook 输出。借用的导出函数和 hook 全部列在 [upstream.cjs](upstream.cjs) 的 `contract` 里，Ryugi 代码也只从那里加载。
 
-`doctor` 逐项检查这份清单（选区 hook 还要能实际运行），每次升级 Ryugi 后可以手动运行。`subscribe` 和 worker 启动时也会自动运行：自检不通过时 `subscribe` 报错且不订阅；worker 暂停转发，给每个已订阅的线程发一条说明（没拿到回执时先核对线程再重发，每 5 秒一次，直到送达）。清单里的文件一变，worker 就退出，由 launchd 拉起后重新自检，修好或回退 Ryugi 后自动恢复。
+`doctor` 逐项检查这份清单（选区 hook 还要能实际运行），再用临时项目确认 Ryugi 的 watcher 仍然把提交和回答报成桥接转发的事件；只用来去掉选区里未读提醒的两个 hook 函数缺失时只警告。每次升级 Ryugi 后可以手动运行。`subscribe` 和 worker 启动时也会自动运行：自检不通过时 `subscribe` 报错且不订阅；worker 暂停转发，给每个已订阅的线程发一条说明（没拿到回执时先核对线程再重发，每 5 秒一次，直到送达）。清单里的文件一变，worker 就退出，由 launchd 拉起后重新自检，修好或回退 Ryugi 后自动恢复。
 
 提交和回答的提醒会内联 Ryugi 的 `comment list --format brief` 结果（Ryugi 1.86 起原生宿主也这么做），agent 不必再跑一次命令。这条命令最多 15 秒，在存储锁外执行，执行完之前同一订阅的后续反馈排在它后面。Ryugi 服务器没在运行时读取失败，提醒退回附带 Run 命令的写法。提醒里的 Run 命令用 agent 运行 start 时的那个启动器，Codex 带上它的 `--ryugi-session`，否则 Codex 会拒绝运行。
 

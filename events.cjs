@@ -32,14 +32,15 @@ function render(event) {
 function message(event, record, host) {
   const kind = { "ryugi-choices": "choices", "ryugi-answers": "answers" }[event.type];
   if (!kind) return null;
-  const launcher = event.argv[0];
-  const rebind = record.launcher && {
+  // Without Ryugi's list argv there is no brief to inline; the Run line still works.
+  const launcher = event.argv?.[0];
+  const rebind = launcher && record.launcher && {
     from: launcher,
     to: quote(record.launcher) + (record.proof ? " --ryugi-session " + record.proof : ""),
   };
   const text = rebound(wakeMessage(event, 500), rebind);
-  if (event.withdrawn) return { kind, text };
-  const project = event.argv[event.argv.indexOf("--project-dir") + 1];
+  if (event.withdrawn || !launcher) return { kind, text };
+  const { project } = record;
   const argv = [launcher, "comment", "list", "--section", "threads", "--detail", "--format", "brief",
     "--project-dir", project, "--artifact", event.artifact];
   const command = `node ${quote(launcher)} ${argv.slice(1, -3).join(" ")} ${quote(project)} --artifact ${event.artifact}`;

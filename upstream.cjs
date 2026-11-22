@@ -12,11 +12,13 @@ const contract = {
   "skills/artifacts/app/comment-subscriptions.cjs": ["projectRoot", "subscriptionFile", "aliveFile", "beat"],
   "skills/artifacts/app/comment-watch.cjs": ["createCommentWatch", "wakeMessage", "unreadCount"],
   "skills/artifacts/app/agent-event.cjs": ["postToServer"],
-  "hooks/selection-context.cjs": ["commentReminders", "cursorKey"],
+  "hooks/selection-context.cjs": [],
 };
+// Only used to trim the hook's unread reminder from selection-context, so doctor just warns without them.
+const reminderHelpers = ["commentReminders", "cursorKey"];
 const load = (file) => require(path.join(plugin, file));
 // Loaded on first use, so doctor can report a broken plugin instead of throwing on require.
 for (const [file, names] of Object.entries(contract))
   for (const name of names)
     Object.defineProperty(exports, name, { enumerable: true, get: () => load(file)[name] });
-Object.assign(exports, { plugin, launcher, hook, contract, load });
+Object.assign(exports, { plugin, launcher, hook, contract, reminderHelpers, load });

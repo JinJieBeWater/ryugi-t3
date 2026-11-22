@@ -24,7 +24,7 @@ test("a native submit becomes a message whose render inlines the brief", (t) => 
   put(path.join(f.root, ".state", a, "rounds.json"), { rounds: [{ id: "r", state: "submitted" }] });
   put(path.join(f.root, ".state", d, "asks.json"), { latest: { id: "s1" } });
   const events = poll();
-  const ours = events.map((e) => message(e, {}, "pi"));
+  const ours = events.map((e) => message(e, { project: f.project }, "pi"));
   assert.deepEqual(ours.map((m) => m.kind).sort(), ["answers", "choices"]);
   for (const [i, item] of ours.entries()) {
     assert.deepEqual(item.render.argv, events[i].argv);
@@ -67,6 +67,13 @@ test("Run lines use the launcher and session proof the agent started with", (t) 
   const [event] = poll();
   const withdrawn = message(event, { launcher: "/codex/app/ryugi.cjs", proof: "x:y" }, "Codex");
   assert.match(withdrawn.text, /Run: node '\/codex\/app\/ryugi\.cjs' --ryugi-session x:y comment list/);
+});
+
+test("an event without Ryugi's list argv still becomes a message with its Run line", () => {
+  const event = { type: "ryugi-answers", artifact: "document/d", submit: "s", questions: 1, command: "node x comment list" };
+  const item = message(event, { project: "/p", launcher: "/a/ryugi.cjs" }, "Codex");
+  assert.match(item.text, /Ryugi answers document\/d submitted.*Run: node x comment list/);
+  assert.equal(item.render, undefined);
 });
 
 test("a rendered brief lists as the thread's host and names the agent's own launcher", () => {

@@ -25,6 +25,8 @@ function pluginCopy(f) {
         original.replace(exportsLine, "module.exports = { createCommentWatch, main, unreadCount };"),
       ),
     fix: () => fs.writeFileSync(watch, original + "\n"),
+    // Ryugi keeps its exports but changes what its watcher emits.
+    reshape: () => fs.writeFileSync(watch, original.replace("type: 'ryugi-choices'", "type: 'ryugi-choice'")),
     copy,
   };
 }
@@ -74,6 +76,26 @@ test("a plugin without the selection hook fails the interface check", (t) => {
   const r = raw(f, "doctor");
   assert.equal(r.status, 1);
   assert.match(r.stdout, /✖ 接口：.*selection-context/);
+});
+
+test("a watcher that stops emitting the events the bridge forwards fails doctor", (t) => {
+  const f = fixture(t);
+  pluginCopy(f).reshape();
+  const r = raw(f, "doctor");
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /✖ 事件：.*choices/);
+});
+
+test("a hook without the reminder helpers only warns, and selection-context still prints", (t) => {
+  const f = fixture(t);
+  const hook = path.join(pluginCopy(f).copy, "hooks/selection-context.cjs");
+  fs.writeFileSync(hook, fs.readFileSync(hook, "utf8").replace("  commentReminders,\n", ""));
+  const r = raw(f, "doctor");
+  assert.equal(r.status, 0, r.stdout);
+  assert.match(r.stdout, /⚠ .*commentReminders/);
+  fs.mkdirSync(path.join(f.root, "document/d"), { recursive: true });
+  put(path.join(f.root, ".state/document/d/selection.json"), { quote: "selected quote", blockIds: ["b"] });
+  assert.match(f.run(["selection-context", "--cwd", f.project]), /> selected quote/);
 });
 
 test("an upgrade that breaks the bridge pauses delivery with one notice and resumes after a fix", async (t) => {
