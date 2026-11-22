@@ -304,7 +304,9 @@ test("subscribe strips the artifact from every native host subscription and the 
   assert.deepEqual(JSON.parse(fs.readFileSync(ours)).artifacts, [a]);
   assert.equal(fs.readFileSync(partial, "utf8"), '{"artifacts":["' + a);
   assert.equal(fs.readFileSync(alive, "utf8"), a);
-  // An expired subscription stops stripping.
+  // An expired subscription stops stripping. An idle thread: a running one would keep renewing the short lease.
+  f.threads[0].status = "completed";
+  put(path.join(f.dir, "threads"), f.threads);
   f.json("subscribe", "--artifact", "artboard/brief", "--ttl", "1");
   await new Promise((r) => setTimeout(r, 1200));
   put(files[0], { artifacts: ["artboard/brief"] });
