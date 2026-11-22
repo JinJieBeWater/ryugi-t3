@@ -47,6 +47,17 @@ test("the alias launcher with --artifact= and a relative project dir also subscr
   );
 });
 
+test("a start run through a host's renamed skill link (Antigravity's ryugi-artifacts) subscribes", (t) => {
+  const f = fixture(t);
+  const real = launcher(f, "ryugi.cjs", "");
+  const link = path.join(f.dir, "host/skills/ryugi-artifacts");
+  fs.mkdirSync(path.dirname(link), { recursive: true });
+  fs.symlinkSync(path.dirname(path.dirname(real)), link);
+  const r = start(f, path.join(link, "app/ryugi.cjs"), ["start", "--artifact", "artboard/layout"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(f.json("list").map((s) => s.artifact), ["artboard/layout"]);
+});
+
 test("failed starts, help, other commands, other scripts and non-T3 shells stay untouched", (t) => {
   const f = fixture(t);
   const ok = launcher(f, "ryugi.cjs", "");

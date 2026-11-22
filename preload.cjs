@@ -5,7 +5,15 @@
 (() => {
   const script = process.argv[1] || "";
   if (!process.env.T3CODE_THREAD_ID) return;
-  if (!/[\\/]skills[\\/]artifacts[\\/]app[\\/]ryugi(?:-artifacts)?\.cjs$/.test(script)) return;
+  if (!/[\\/]ryugi(?:-artifacts)?\.cjs$/.test(script)) return;
+  // Hosts link the skill under their own names (Antigravity: skills/ryugi-artifacts); match the real path.
+  let real;
+  try {
+    real = require("node:fs").realpathSync(script);
+  } catch {
+    return;
+  }
+  if (!/[\\/]skills[\\/]artifacts[\\/]app[\\/]ryugi(?:-artifacts)?\.cjs$/.test(real)) return;
   const autosub = require("./autosub.cjs");
   const cwd = process.cwd();
   const goal = autosub.target(process.argv.slice(2), cwd);
