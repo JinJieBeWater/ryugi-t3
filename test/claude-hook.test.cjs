@@ -14,7 +14,7 @@ function session(f, cwd, extra = {}, install = true) {
     ...f.env,
     CLAUDE_ENV_FILE: file,
     XDG_DATA_HOME: path.join(f.dir, "data"),
-    RYUGI_T3_WATCH_PLUGIN: require("../plugin.cjs"),
+    RYUGI_T3_WATCH_PLUGIN: require("../upstream.cjs").plugin,
     ...extra,
   };
   delete env.NODE_OPTIONS;

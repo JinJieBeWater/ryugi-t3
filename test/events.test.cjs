@@ -3,8 +3,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const { fixture, put } = require("./fixtures.cjs");
 const { message, render } = require("../events.cjs");
-const { app } = require("../upstream.cjs");
-const { createCommentWatch, wakeMessage } = app("comment-watch");
+const { createCommentWatch, wakeMessage } = require("../upstream.cjs");
 
 // Ryugi's own watcher: its first look is the baseline, later looks return what changed.
 function watcher(f, artifacts) {

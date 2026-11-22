@@ -3,8 +3,8 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const fs = require("node:fs");
 const { fixture, put, until } = require("./fixtures.cjs");
-const { app } = require("../upstream.cjs");
-const { humanTokens, reviewStateKey } = app("comment-threads");
+const { load } = require("../upstream.cjs");
+const { humanTokens, reviewStateKey } = load("skills/artifacts/app/comment-threads.cjs");
 const thread = (id, text, anchor = {}) => ({
   id,
   anchor,

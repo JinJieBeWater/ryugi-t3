@@ -1,5 +1,4 @@
-const { app } = require("./upstream.cjs");
-const { unreadCount, wakeMessage } = app("comment-watch");
+const { unreadCount, wakeMessage } = require("./upstream.cjs");
 
 const quote = (s) => "'" + s.replaceAll("'", "'\"'\"'") + "'";
 // The worker runs outside any agent, so Ryugi's CLI is told whose unread comments to list

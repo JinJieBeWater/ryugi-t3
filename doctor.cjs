@@ -1,18 +1,13 @@
 // Checks that the installed Ryugi plugin still offers what the bridge borrows from it.
 // Loads nothing eagerly so a broken plugin is reported, not thrown.
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { setTimeout: sleep } = require("node:timers/promises");
 const { locked, label, launch } = require("./store.cjs");
 const { call, show } = require("./t3.cjs");
-const plugin = require("./plugin.cjs");
-const appDir = path.join(plugin, "skills/artifacts/app");
-const modules = ["comment-subscriptions", "comment-watch", "agent-event"];
-const needs = {
-  "comment-subscriptions": ["projectRoot", "aliveFile", "beat", "subscriptionFile", "checkouts"],
-  "comment-watch": ["createCommentWatch", "unreadCount", "wakeMessage"],
-  "agent-event": ["postToServer"],
-};
+const upstream = require("./upstream.cjs");
+const { plugin, launcher, contract, load } = upstream;
 function version() {
   try {
     return JSON.parse(fs.readFileSync(path.join(plugin, "package.json"), "utf8")).version || null;
@@ -22,7 +17,7 @@ function version() {
 }
 // Changes whenever an upgrade replaces any file the bridge loads.
 function fingerprint() {
-  const files = ["package.json", ...[...modules, "comment-threads", "ryugi"].map((n) => `skills/artifacts/app/${n}.cjs`), "hooks/selection-context.cjs"];
+  const files = ["package.json", path.relative(plugin, launcher), ...Object.keys(contract)];
   return files
     .map((f) => {
       try {
@@ -48,17 +43,31 @@ function doctor() {
     if (!version()) throw new Error("找不到 " + path.join(plugin, "package.json"));
   });
   check("启动器", () => {
-    fs.accessSync(path.join(appDir, "ryugi.cjs"));
+    fs.accessSync(launcher);
   });
   check("接口", () => {
-    const missing = modules.flatMap((m) => {
-      const exported = require(path.join(appDir, m + ".cjs"));
-      return needs[m].filter((n) => typeof exported[n] !== "function").map((n) => `${m}.${n}`);
+    const missing = Object.entries(contract).flatMap(([file, names]) => {
+      let exported;
+      try {
+        exported = load(file);
+      } catch {
+        return [file];
+      }
+      const name = path.basename(file, ".cjs");
+      return names.filter((n) => typeof exported[n] !== "function").map((n) => `${name}.${n}`);
     });
     if (missing.length) throw new Error("缺少 " + missing.join("、"));
+    // The selection hook also has to run as selection-context runs it.
+    const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ryugi-t3-doctor-")));
+    try {
+      fs.mkdirSync(path.join(project, ".ryugi/artifacts"), { recursive: true });
+      require("./selection.cjs").selectionContext({ cwd: project });
+    } finally {
+      fs.rmSync(project, { recursive: true, force: true });
+    }
   });
   check("订阅文件路径", () => {
-    const { subscriptionFile, aliveFile } = require(path.join(appDir, "comment-subscriptions.cjs"));
+    const { subscriptionFile, aliveFile } = upstream;
     const dir = path.join("/p", ".ryugi/artifacts/.state/codex-comment-watch");
     if (subscriptionFile("/p", "codex", "s") !== path.join(dir, "s.json"))
       throw new Error("subscriptionFile 返回 " + subscriptionFile("/p", "codex", "s"));

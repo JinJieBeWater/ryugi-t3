@@ -3,9 +3,14 @@ const os = require("node:os");
 const path = require("node:path");
 const { setTimeout: sleep } = require("node:timers/promises");
 const { randomUUID } = require("node:crypto");
-const { projectRoot, aliveFile, beat, subscriptionFile, app } = require("./upstream.cjs");
-const { postToServer } = app("agent-event");
-const { createCommentWatch } = app("comment-watch");
+const {
+  projectRoot,
+  aliveFile,
+  beat,
+  subscriptionFile,
+  postToServer,
+  createCommentWatch,
+} = require("./upstream.cjs");
 const { atomic, stateRoot, locked, load, label, launch } = require("./store.cjs");
 const { message, render } = require("./events.cjs");
 const { transport, call, show } = require("./t3.cjs");

@@ -12,9 +12,8 @@ function pluginCopy(f) {
   const copy = path.join(f.dir, "plugin");
   fs.mkdirSync(copy);
   fs.copyFileSync(path.join(plugin, "package.json"), path.join(copy, "package.json"));
-  fs.cpSync(path.join(plugin, "skills/artifacts/app"), path.join(copy, "skills/artifacts/app"), {
-    recursive: true,
-  });
+  for (const part of ["skills/artifacts/app", "hooks"])
+    fs.cpSync(path.join(plugin, part), path.join(copy, part), { recursive: true });
   f.env.RYUGI_T3_WATCH_PLUGIN = copy;
   const watch = path.join(copy, "skills/artifacts/app/comment-watch.cjs");
   const original = fs.readFileSync(watch, "utf8");
@@ -26,6 +25,7 @@ function pluginCopy(f) {
         original.replace(exportsLine, "module.exports = { createCommentWatch, main, unreadCount };"),
       ),
     fix: () => fs.writeFileSync(watch, original + "\n"),
+    copy,
   };
 }
 const raw = (f, ...args) =>
@@ -47,9 +47,8 @@ test("doctor uses the managed Pi plugin by default even if a Gemini copy exists"
   put(path.join(f.dir, ".gemini/config/plugins/ryugi/package.json"), { version: "1.0.0" });
   const managed = path.join(f.dir, ".local/share/ryugi/install/plugins/pi/plugin");
   put(path.join(managed, "package.json"), { version: "2.0.0" });
-  fs.cpSync(path.join(plugin, "skills/artifacts/app"), path.join(managed, "skills/artifacts/app"), {
-    recursive: true,
-  });
+  for (const part of ["skills/artifacts/app", "hooks"])
+    fs.cpSync(path.join(plugin, part), path.join(managed, part), { recursive: true });
   const r = raw(f, "doctor");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /Ryugi 2\.0\.0/);
@@ -67,6 +66,14 @@ test("a plugin that drops an export fails doctor and subscribe records nothing",
   assert.match(s.stderr, /wakeMessage/);
   assert.deepEqual(f.json("list"), []);
   assert.notEqual(f.launch("list", f.label).status, 0);
+});
+
+test("a plugin without the selection hook fails the interface check", (t) => {
+  const f = fixture(t);
+  fs.rmSync(path.join(pluginCopy(f).copy, "hooks/selection-context.cjs"));
+  const r = raw(f, "doctor");
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /✖ 接口：.*selection-context/);
 });
 
 test("an upgrade that breaks the bridge pauses delivery with one notice and resumes after a fix", async (t) => {
