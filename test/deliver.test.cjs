@@ -32,7 +32,7 @@ if (args[1] === "show") {
   process.stderr.write("server unavailable\\n");
   process.exit(1);
 } else {
-  console.log(JSON.stringify({ threadId: id, messageId: "m1", delivery: "queued" }));
+  console.log(JSON.stringify({ threadId: id, messageId: "m1", delivery: state.delivery || "queued" }));
 }
 `;
 
@@ -44,7 +44,8 @@ function run(t, state) {
   fs.writeFileSync(path.join(dir, "state.json"), JSON.stringify(state));
   const result = spawnSync(deliver, [], {
     input: JSON.stringify({ protocol: 1, host: "t3", session: THREAD, wakeMessage: MESSAGE, event: {} }),
-    env: { ...process.env, T3CODE_CLI_PATH: t3, T3CODE_HOME: dir },
+    // Agent shells from the old bridge still carry this; delivery must not depend on the file existing.
+    env: { ...process.env, T3CODE_CLI_PATH: t3, T3CODE_HOME: dir, NODE_OPTIONS: "--require /nonexistent/preload.cjs" },
     encoding: "utf8",
   });
   const calls = fs.existsSync(path.join(dir, "calls.jsonl"))
@@ -53,14 +54,16 @@ function run(t, state) {
   return { ...result, sends: calls.filter((c) => c.args[1] === "send"), dir };
 }
 
-test("sends the wake message to the session's thread and reports T3's delivery", (t) => {
-  const r = run(t, { threads: { [THREAD]: {} } });
-  assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(JSON.parse(r.stdout), { status: "queued" });
-  assert.equal(r.sends.length, 1);
-  assert.deepEqual(r.sends[0].args, ["thread", "send", "--base-dir", r.dir, "--json", THREAD, "-"]);
-  assert.equal(r.sends[0].stdin, MESSAGE);
-});
+// T3 answers started for an idle thread, queued behind a running turn, and steered or restarted when it folds the message into one.
+for (const delivery of ["started", "queued", "steered", "restarted"])
+  test(`sends the wake message to the session's thread and reports a ${delivery} delivery`, (t) => {
+    const r = run(t, { threads: { [THREAD]: {} }, delivery });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { status: delivery });
+    assert.equal(r.sends.length, 1);
+    assert.deepEqual(r.sends[0].args, ["thread", "send", "--base-dir", r.dir, "--json", THREAD, "-"]);
+    assert.equal(r.sends[0].stdin, MESSAGE);
+  });
 
 for (const [name, threads] of [
   ["an archived thread", { [THREAD]: { archived: true } }],

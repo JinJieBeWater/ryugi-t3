@@ -37,7 +37,8 @@ try {
   if (!before || before.thread.archived) process.exit(UNSUBSCRIBE);
   try {
     const ack = call("send", [session, "-"], wakeMessage);
-    if (ack.threadId !== session || !ack.messageId || !["started", "queued"].includes(ack.delivery))
+    const landed = ["started", "queued", "steered", "restarted"].includes(ack.delivery);
+    if (ack.threadId !== session || !ack.messageId || !landed)
       throw Error("T3 returned no receipt");
     console.log(JSON.stringify({ status: ack.delivery }));
   } catch (e) {

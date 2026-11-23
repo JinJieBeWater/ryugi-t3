@@ -1,5 +1,7 @@
 #!/bin/sh
 entry=$(/usr/bin/readlink -f "$0") || exit 1
+# Inherited from the agent's shell; a --require of a since-deleted file would stop node from starting.
+unset NODE_OPTIONS
 for node in "$(command -v node)" /opt/homebrew/bin/node "$HOME/.local/share/mise/shims/node" "$HOME/.vite-plus/bin/node"; do
   [ -x "$node" ] && exec "$node" "${entry%/*}/deliver.cjs" "$@"
 done
