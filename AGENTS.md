@@ -1,16 +1,16 @@
 # ryugi-t3
 
-The Ryugi custom-host command for T3 Code: it delivers artifact feedback (comments, submitted rounds, answers) back to the T3 thread that subscribed. One maintainer uses it on macOS.
+ryugi-t3 is the Ryugi custom host for T3 Code. It delivers artifact feedback to the T3 thread that subscribed to it. One maintainer runs it on macOS.
 
 ## What we never compromise on
 
 ### Feedback reaches the thread exactly once
 
-Ryugi reads only the exit code: 0 means delivered, 10 means the thread is gone and Ryugi unsubscribes, and any other code makes Ryugi retry. A message T3 accepted must never exit non-zero, or the thread gets it twice. That is why `deliver.cjs` counts a send whose receipt was lost as delivered when the thread's last user message matches, and why `hosts.t3.timeoutMs` must stay above the worst-case run of three `t3` calls at 10 seconds each.
+Ryugi reads only the exit code. 0 means delivered, 10 means the thread is gone and Ryugi unsubscribes, and any other code makes Ryugi retry. Once T3 has accepted a message, the command must exit 0; any other code makes Ryugi send it again. Two things follow. `deliver.cjs` treats a send with a lost receipt as delivered when the thread's last user message matches it. `hosts.t3.timeoutMs` stays above the worst case of three `t3` calls at 10 seconds each, because Ryugi kills a command that runs past it and sends again.
 
-### serve and Ryugi's watcher never fight
+### serve and the Ryugi watcher never fight
 
-For each session the hub keeps only the newest connection. serve reconnects one second after it is replaced, and this stays quiet only because Ryugi's `cmd-comment-watch` exits once it is replaced. If upstream ever makes its watcher reconnect too, the two will replace each other every second. Recheck this behavior after each Ryugi upgrade that touches `hub-channel.cjs` or `cmd-comment-watch.cjs`.
+The hub keeps only the newest connection for each session. serve reconnects one second after the Ryugi watcher replaces it, and the Ryugi watcher exits once serve replaces it back. That exit is what keeps the two quiet. If upstream makes the Ryugi watcher reconnect too, they replace each other every second. After a Ryugi upgrade that changes `hub-channel.cjs` or `cmd-comment-watch.cjs`, run the test "takes the session back after a Ryugi watcher replaces it" in `test/serve.test.cjs` and watch `~/Library/Logs/ryugi-t3.log` for a reconnect loop.
 
 ## How we work
 
@@ -27,18 +27,18 @@ We need to be on the same page with terminology. When communicating, use this la
 - **you** means the agent reading this file and changing this project.
 - **we, us, and maintainers** mean the people building this project. These are who you are talking to now.
 - **user** means the person using what this project ships.
-- **hub** means the shared Ryugi server process. It detects new feedback and pushes it over a Unix socket.
+- **hub** means the shared Ryugi server process. It detects new feedback and pushes it to the connection that holds each session.
 - **subscription** means an entry in `~/.ryugi/server/agent-subscriptions.json`, keyed `host:session`. For T3 the session is the thread id.
-- **Ryugi watcher** means the `cmd-comment-watch` process that `ryugi start` spawns from the agent's shell. T3 kills it when a Claude CLI exits.
+- **Ryugi watcher** means the `cmd-comment-watch` process that `ryugi start` spawns from the agent's shell. In a Claude thread, T3 kills it when the Claude CLI exits.
 - **serve** means `ryugi-t3 serve`, the launchd-owned process that holds the hub connection for every custom-host subscription.
-- **receipt** means the `delivery` field that `t3 thread send` returns: `started`, `queued`, `steered`, or `restarted`.
+- **receipt** means the `delivery` field that `t3 thread send` returns. Each of its four values, `started`, `queued`, `steered`, and `restarted`, means the thread accepted the message.
 
 ## Ways to hurt yourself
 
 1. **Killing by pattern.** Never `pkill -f`, `pgrep | kill`, or `kill` a PID you found by matching a name, path, or worktree string. Your own agent process has this worktree's path in its argv, and this machine runs several other dev servers at once. Kill only a PID you captured at spawn, or the owner of your port after confirming its cwd is your worktree.
-2. **Writing Ryugi's live state.** The hub owns `~/.ryugi/server/agent-subscriptions.json`, and `~/.config/ryugi/config.json` routes every T3 thread's feedback. Tests point `RYUGI_SERVER_HOME`, `RYUGI_HOSTS_CONFIG`, `RYUGI_HUB_SOCKET`, and `T3CODE_CLI_PATH` at temp dirs and fakes. Keep it that way.
-3. **A second serve.** Running `node serve.cjs` or `ryugi-t3 serve` by hand while the launchd job is up starts two processes that replace each other every second. Restart the job with `launchctl kickstart -k gui/$(id -u)/dev.ryugi-t3.serve` instead.
-4. **Sending to a real thread.** `deliver.cjs` against a real `T3CODE_THREAD_ID` starts a real agent turn. Use the fake T3 CLI from `test/deliver.test.cjs`.
+2. **Writing Ryugi's live state.** The hub owns `~/.ryugi/server/agent-subscriptions.json`, and `~/.config/ryugi/config.json` routes the feedback of every T3 thread. Read them only. Tests point `RYUGI_SERVER_HOME`, `RYUGI_HOSTS_CONFIG`, `RYUGI_HUB_SOCKET`, and `T3CODE_CLI_PATH` at temp dirs and fakes; new tests do the same.
+3. **A second serve.** A serve started by hand next to the launchd job replaces it every second, and the job replaces it back. Restart the job with `launchctl kickstart -k gui/$(id -u)/dev.ryugi-t3.serve`.
+4. **Sending to a real thread.** `deliver.cjs` aimed at a real thread starts a real agent turn. Point `T3CODE_CLI_PATH` at the fake T3 CLI from `test/deliver.test.cjs`.
 
 ## Hit every surface
 
@@ -52,13 +52,13 @@ The most common defect is a change that works on the path you tested and is miss
 
 This project's surfaces:
 
-- **Providers.** T3's Claude, Codex, Pi, and Antigravity threads all reach this project through `T3CODE_THREAD_ID`. T3 terminals do not set that variable, so `ryugi start` there falls back to the native host.
-- **Connection holders.** Both Ryugi's watcher and serve run `deliverComment` and this command, so a change to delivery affects both.
-- **Ryugi installs.** The managed plugins live under `~/.local/share/ryugi/install/plugins/{agy,pi,codex}`, and serve loads the newest of them. The Claude Code plugin updates separately through `claude plugin update ryugi@ryugi-dev`.
+- **Providers.** T3 sets `T3CODE_THREAD_ID` for Claude, Codex, Pi, and Antigravity threads, so all four reach this project. T3 terminals lack it, and `ryugi start` there subscribes under the native host.
+- **Connection holders.** Whichever of serve and the Ryugi watcher holds a session runs `deliver.cjs` through Ryugi's `deliverComment`. A change to `deliver.cjs` reaches both; a change to `serve.cjs` reaches only serve.
+- **Ryugi installs.** serve loads the newest plugin under `~/.local/share/ryugi/install/plugins/`. The Claude Code plugin is a separate copy that `ryugi update` leaves alone; update it with `claude plugin update ryugi@ryugi-dev`.
 
 ## Dev servers
 
-The launchd job `dev.ryugi-t3.serve` is the one process meant to outlive the session, and the maintainer asked for it. `./launchd.sh` installs or reinstalls it and `./launchd.sh uninstall` removes it. It logs to `~/Library/Logs/ryugi-t3.log`. serve exits when the Ryugi plugin version changes so that launchd restarts it on the new modules.
+The launchd job `dev.ryugi-t3.serve`, installed by `./launchd.sh`, is the one process meant to outlive a session; the maintainer asked for it. serve exits when the Ryugi plugin version changes and launchd starts it again on the new modules, so a restart in `~/Library/Logs/ryugi-t3.log` after `ryugi update` is expected.
 
 - Stop what you started, by the PID you tracked. See "Killing by pattern".
 - Run dev servers and builds from your own shell so they end with your session. Do not detach them with `systemd-run`, `nohup`, `setsid`, or `tmux` unless the user asks for one that outlives the session. Detached servers ran for weeks and filled RAM and swap.
@@ -66,12 +66,11 @@ The launchd job `dev.ryugi-t3.serve` is the one process meant to outlive the ses
 
 ## Verifying
 
-`npm test` runs every test in about three seconds. Run one file with `node --test test/serve.test.cjs`. The serve tests load the installed Ryugi plugin's modules, so they fail on a machine without a Ryugi install. A broken reconnect makes a test hang rather than fail, so wrap the run in an outside guard such as a 40-second wait-then-kill on the PID you captured.
+`npm test` runs the whole suite in about three seconds; run one file with `node --test test/serve.test.cjs`. The serve tests load the installed Ryugi plugin, so they need a Ryugi install on the machine. A broken reconnect makes a serve test hang, not fail. Run the suite in the background, capture its PID, and kill that PID if it is still running after 40 seconds.
 
 - Test behavior that can break, such as orchestration, protocol translation, auth and permission guards, persistence and migrations, external-format parsing, race fixes, and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial logic, copy text, smoke runs, mock-call mirrors, callback wiring, and props rendered to static markup.
 - Extend before you add. When an existing test or table covers the behavior, add a row or an assertion there. Write a new test only when no case fits.
 - Test at one layer: the lowest one that fails on `main`. Do not repeat the case in a wrapper test, at each call site, or in copies of the same logic.
-- **Do not run repo-wide checks** unless asked. CI owns the full suite.
 - Backend behavior changes ship with focused tests for that behavior.
 - Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test first (the fewest that fail on `main` for that reason, in an existing case where one fits), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get before/after captures as their proof and no test. A server-only fix with no visible surface ships the test plus a short runtime transcript.
 - Never wait on sleeps or polling. Await the event, promise, or queue item that marks the milestone. A test that needs a timeout to pass is wrong.
@@ -110,15 +109,17 @@ Most code changes do not need an internal documentation change. Agents can read 
 
 ## How it works
 
-`ryugi start` in a T3 thread subscribes `t3:<thread id>`. serve notices the change in the subscriptions file, opens a hub connection for that session using Ryugi's own `hub-channel.cjs` and `delivery-queue.cjs`, and runs `ryugi-t3` (which runs `deliver.cjs`) once for each event. `deliver.cjs` sends the wake message with `t3 thread send`. The Ryugi modules serve depends on are all required at the top of `serve()`, and `sync()` is the only code that reads the subscriptions file format.
+`ryugi start` in a T3 thread writes the subscription `t3:<thread id>`. serve sees the subscriptions file change and opens a hub connection for that session with Ryugi's own `hub-channel.cjs` and `delivery-queue.cjs`. For each event it runs `ryugi-t3`, which runs `deliver.cjs`, which sends the wake message with `t3 thread send`.
+
+serve depends on Ryugi internals in two places, and keeps each in one spot. The plugin modules are required at the top of `serve()`. The subscriptions file format is read only in `sync()`. Neither is a public Ryugi API, so a Ryugi upgrade can break them.
 
 ## Taste
 
 - Complexity belongs at the adapter boundary. Orchestration stays pure, UI stays dumb.
 - Default to no comment. Write one only for a constraint, an external quirk, or an invariant the code can't show, in one line where you can and four at most. Don't restate names or signatures, narrate steps, record history, or explain the fix you just made; the PR carries that.
 - If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
-- Plain CommonJS with no dependencies and no build step. Reuse Ryugi's plugin modules rather than re-implementing its hub protocol.
-- This project exists only to work around a gap upstream. When Ryugi runs custom-host commands from the hub itself, delete `serve.cjs`, `launchd.sh`, and the matching README section rather than keeping them as a fallback.
+- Plain CommonJS, no dependencies, no build step. Reuse Ryugi's plugin modules for anything that speaks the hub protocol.
+- `deliver.cjs` is the lasting part. serve and `launchd.sh` exist only because the Ryugi watcher dies inside T3. Once Ryugi runs custom-host commands from a process outside the agent's process tree, delete `serve.cjs`, `launchd.sh`, their tests, and the README section about them.
 
 ## Additional tips
 
