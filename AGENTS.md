@@ -54,7 +54,7 @@ This project's surfaces:
 
 - **Providers.** T3 sets `T3CODE_THREAD_ID` for Claude, Codex, Pi, and Antigravity threads, so all four reach this project. T3 terminals lack it, and `ryugi start` there subscribes under the native host.
 - **Connection holders.** Whichever of serve and the Ryugi watcher holds a session runs `deliver.cjs` through Ryugi's `deliverComment`. A change to `deliver.cjs` reaches both; a change to `serve.cjs` reaches only serve.
-- **Ryugi installs.** serve loads the newest plugin under `~/.local/share/ryugi/install/plugins/`. The Claude Code plugin is a separate copy that `ryugi update` leaves alone; update it with `claude plugin update ryugi@ryugi-dev`.
+- **Ryugi installs.** serve loads the newest plugin under `~/.local/share/ryugi/install/plugins/`. The Claude Code plugin is a separate copy under `~/.claude/plugins/cache/ryugi-dev/`; check its version with `claude plugin list` after an upgrade.
 
 ## Dev servers
 

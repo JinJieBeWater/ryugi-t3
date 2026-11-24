@@ -49,7 +49,7 @@ serve.cjs 用的是 Ryugi 的内部实现，包括订阅表的格式，以及插
 
 ## 升级 Ryugi 之后
 
-`ryugi update` 只刷新 Claude Code 插件的 marketplace，不升级已经装好的插件。用 `claude plugin list` 核对版本；旧了就运行 `claude plugin update ryugi@ryugi-dev`。不更新的话，T3 里的 Claude 线程还按旧插件订阅，反馈不会走这里。
+从 1.102.9 或更早的版本升级时，`ryugi update` 用旧版代码刷新 Claude Code 插件。旧版代码只运行 `claude plugin install`，已经装好的插件不会升级，T3 里的 Claude 线程就还按旧插件订阅，反馈不会走这里。升级后用 `claude plugin list` 核对版本，旧了就运行 `claude plugin update ryugi@ryugi-dev`。当前版本是 1.105.2 或更新时，升级不会遇到这个问题。
 
 ## 开发
 
