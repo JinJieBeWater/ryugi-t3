@@ -45,7 +45,6 @@ We need to be on the same page with terminology. When communicating, use this la
 The most common defect is a change that works on the path you tested and is missing everywhere else. Before calling work done, walk this list and say which entries applied:
 
 - **Entry points.** A behavior reachable from one place is usually also reachable from others. Fixing one is not fixing the feature.
-- **Agents.** A capability a user can trigger is usually one an agent should reach through tools, and scheduled tasks run the same paths. That only works when it is a service method, not handler code.
 - **Contracts.** Anything crossing a process or network boundary is typed in one place. Change the schema and every consumer follows.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the [documentation rules](#documentation) before adding anything.
@@ -77,7 +76,6 @@ The launchd job `dev.ryugi-t3.serve`, installed by `./launchd.sh`, is the one pr
   - No per-test timeout argument or `retry`. Flaky tests are fixed, not retried.
   - No `performance.now()` or `Date.now()` deltas. Assert on events and counts, not elapsed time.
   - `it.skip` and friends need a tracking issue on the line above: `// quarantine: #1234 <why>`.
-- User-visible changes get one integrated pass in a real client. The primary agent does this once after integrating. Subagents do not launch their own dev servers.
 - Real agent turns cost money. Use a free replay or mock provider when one exists. Use a real provider only when the change depends on that provider's behavior, and then pick its cheapest model.
 
 ## Pull requests
@@ -87,7 +85,6 @@ The launchd job `dev.ryugi-t3.serve`, installed by `./launchd.sh`, is the one pr
 - Conventional commit titles, plain language: `fix(web): new threads no longer spike CPU`.
 - Body: the problem in a sentence or two, then how you fixed it. End with the model and harness that did the work.
 - One request is one PR. Split it only when the maintainer asks.
-- When babysitting: do not poll or sleep. Verify each bot finding against the source, fix real ones, dismiss false positives with a written reason. Stay quiet when nothing is new. Stop when the bots are green on the latest commit.
 
 ## Documentation
 
@@ -115,7 +112,6 @@ serve depends on three Ryugi internals, none of them a public API: the subscript
 
 ## Taste
 
-- Complexity belongs at the adapter boundary. Orchestration stays pure, UI stays dumb.
 - Default to no comment. Write one only for a constraint, an external quirk, or an invariant the code can't show, in one line where you can and four at most. Don't restate names or signatures, narrate steps, record history, or explain the fix you just made; the PR carries that.
 - If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
 - Plain CommonJS, no dependencies, no build step. Let Ryugi's own watcher do everything that speaks the hub protocol; serve only decides which watchers should be running.

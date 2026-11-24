@@ -1,7 +1,6 @@
 {
   "name": "ryugi-t3",
   "private": true,
-  "type": "module",
   "scripts": {
     "test": "node --test 'test/*.test.cjs'"
   },

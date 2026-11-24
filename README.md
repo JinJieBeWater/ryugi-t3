@@ -2,7 +2,7 @@
 
 把 Ryugi 产物上的反馈送回 T3 Code 线程。人在 Ryugi 查看器里留评论、提交一轮选项或回答问题后，运行过 `ryugi start` 的那个 T3 线程会收到一条唤醒消息。
 
-需要 macOS、Node.js 22+、Ryugi 1.102.8+ 和 T3 Code。
+需要 macOS、Node.js 22+、Ryugi 1.105.4+ 和 T3 Code。
 
 ## 安装
 
@@ -43,9 +43,9 @@ T3 CLI 的路径取 `T3CODE_CLI_PATH`，数据目录取 `T3CODE_HOME`，默认�
 
 Ryugi 自己的做法是让 `ryugi start` 在 agent 的 shell 里为每个会话拉起一个 watcher，由它持有 hub 连接。在 T3 里这个 watcher 活不长。Claude CLI 退出时，T3 会 `SIGKILL` 它留下的所有进程，watcher 也在其中。重启电脑后 watcher 也没了。没有连接，反馈就一直留在 hub 里。
 
-serve.cjs 读 hub 的订阅表 `~/.ryugi/server/agent-subscriptions.json`，为每个自定义宿主的订阅运行一个 Ryugi 自己的 watcher（`ryugi-hook watch cmd`）。这些 watcher 是 serve.cjs 的子进程，不在 T3 的进程树里。连接 hub、投递、重试和退订都由 watcher 完成，hub 没在运行时 watcher 会启动它。hub 每个会话只保留最新的连接：`ryugi start` 拉起的 watcher 连进来会顶掉 serve.cjs 的那个，一秒后 serve.cjs 再起一个顶回去，被顶掉的 watcher 自行退出。
+serve.cjs 为每个自定义宿主的订阅运行一个 Ryugi 自己的 watcher（`ryugi-hook watch cmd`）。这些 watcher 是 serve.cjs 的子进程，不在 T3 的进程树里。连接 hub、投递、重试和退订都由 watcher 完成，hub 没在运行时 watcher 会启动它。
 
-serve.cjs 依赖 Ryugi 的内部实现，包括订阅表的格式、`ryugi-hook watch cmd` 的输入格式，以及 watcher 二进制在 `~/.ryugi/hook/<版本>/` 下的位置。版本取 `ryugi update` 维护的安装目录里最新的插件。哪天 Ryugi 让自定义宿主的 watcher 活在 agent 进程树之外，这个常驻进程就可以卸掉。
+serve.cjs 依赖 Ryugi 的内部实现，Ryugi 升级后可能失效。升级后看一眼 `~/Library/Logs/ryugi-t3.log`，watcher 反复重启就是出了问题。哪天 Ryugi 让自定义宿主的 watcher 活在 agent 进程树之外，这个常驻进程就可以卸掉。
 
 ## 升级 Ryugi 之后
 
@@ -53,4 +53,4 @@ serve.cjs 依赖 Ryugi 的内部实现，包括订阅表的格式、`ryugi-hook 
 
 ## 开发
 
-运行 `npm test`。serve 的测试会加载本机安装的 Ryugi 插件。
+运行 `npm test`。测试用假的 T3 CLI、hub 和 watcher，不碰本机的 Ryugi 和 T3。
