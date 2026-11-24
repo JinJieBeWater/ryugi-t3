@@ -43,9 +43,9 @@ T3 CLI 的路径取 `T3CODE_CLI_PATH`，数据目录取 `T3CODE_HOME`，默认�
 
 Ryugi 自己的做法是让 `ryugi start` 在 agent 的 shell 里为每个会话拉起一个 watcher，由它持有 hub 连接。在 T3 里这个 watcher 活不长。Claude CLI 退出时，T3 会 `SIGKILL` 它留下的所有进程，watcher 也在其中。重启电脑后 watcher 也没了。没有连接，反馈就一直留在 hub 里。
 
-serve.cjs 读 hub 的订阅表 `~/.ryugi/server/agent-subscriptions.json`，为每个自定义宿主的订阅开一条 hub 连接，收到反馈就运行上面的投递命令。hub 每个会话只保留最新的连接。`ryugi start` 拉起的 watcher 连进来会顶掉 serve.cjs，一秒后 serve.cjs 再顶回去，watcher 被顶掉后自行退出。hub 没在运行时，serve.cjs 会启动它。
+serve.cjs 读 hub 的订阅表 `~/.ryugi/server/agent-subscriptions.json`，为每个自定义宿主的订阅运行一个 Ryugi 自己的 watcher（`ryugi-hook watch cmd`）。这些 watcher 是 serve.cjs 的子进程，不在 T3 的进程树里。连接 hub、投递、重试和退订都由 watcher 完成，hub 没在运行时 watcher 会启动它。hub 每个会话只保留最新的连接：`ryugi start` 拉起的 watcher 连进来会顶掉 serve.cjs 的那个，一秒后 serve.cjs 再起一个顶回去，被顶掉的 watcher 自行退出。
 
-serve.cjs 用的是 Ryugi 的内部实现，包括订阅表的格式，以及插件里的 `hub-channel.cjs`、`delivery-queue.cjs`、`cmd-comment-watch.cjs` 和 `custom-hosts.cjs`。这些模块从 `ryugi update` 维护的安装目录加载。插件版本变了，serve.cjs 会退出，launchd 用新模块重新启动它。哪天 Ryugi 在 agent 进程树之外运行自定义宿主命令，这个常驻进程就可以卸掉。
+serve.cjs 依赖 Ryugi 的内部实现，包括订阅表的格式、`ryugi-hook watch cmd` 的输入格式，以及 watcher 二进制在 `~/.ryugi/hook/<版本>/` 下的位置。版本取 `ryugi update` 维护的安装目录里最新的插件。哪天 Ryugi 让自定义宿主的 watcher 活在 agent 进程树之外，这个常驻进程就可以卸掉。
 
 ## 升级 Ryugi 之后
 

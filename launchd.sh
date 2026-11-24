@@ -11,7 +11,7 @@ if [ "${1-}" = uninstall ]; then
 fi
 entry=$(/usr/bin/readlink -f "$0")
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
-# AbandonProcessGroup keeps a hub this process started alive across its restarts.
+# AbandonProcessGroup keeps a hub that one of serve's watchers started alive across serve's restarts.
 cat > "$plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
